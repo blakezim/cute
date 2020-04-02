@@ -3,6 +3,11 @@ import glob
 
 from scipy.io import loadmat
 
+import matplotlib
+matplotlib.use('qt5agg')
+import matplotlib.pyplot as plt
+plt.ion()
+
 
 def process_data():
     data_path = './Data/RawData/'
@@ -20,7 +25,7 @@ def process_data():
         ute1 = torch.tensor(mat_dict['Ims1reg'])
         ute2 = torch.tensor(mat_dict['Ims2reg'])
         ct = torch.tensor(mat_dict['imsCTreg'])
-        ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+        ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
 
         train_input.append(torch.stack((ute1, ute2), 0))
         train_masks.append(ct_mask)
@@ -38,7 +43,7 @@ def process_data():
     ute1 = torch.tensor(mat_dict['Ims1reg'])
     ute2 = torch.tensor(mat_dict['Ims2reg'])
     infer_label = torch.tensor(mat_dict['imsCTreg'])
-    infer_masks = torch.tensor(mat_dict['CTbinaryMaskReg'])
+    infer_masks = torch.tensor(mat_dict['UTEbinaryMaskReg'])
     infer_input = torch.stack((ute1, ute2), 0)
 
     print('done')
