@@ -19,7 +19,7 @@ from models import unet_model
 # from VNet.vNetModel import vnet_model
 # from collections import OrderedDict
 import matplotlib
-matplotlib.use('qt5agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 plt.ion()
 
@@ -232,9 +232,9 @@ def learn(opt):
     model = model.to(device)
     model = nn.DataParallel(model)
 
-    optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-5, momentum=0.5, nesterov=True)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=50, verbose=True, factor=0.8,
-                                                     threshold=5e-3, cooldown=200, min_lr=1e-8)
+    optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-5, momentum=0.8, nesterov=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=50, verbose=True, factor=0.5,
+                                                     threshold=5e-3, cooldown=200, min_lr=1e-6)
 
     print("===> Beginning Training")
 
