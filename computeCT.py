@@ -161,10 +161,10 @@ def learn(opt):
         print('===> Evaluating Model')
         with torch.no_grad():
             for iteration, batch in enumerate(testing_data_loader, 1):
-                fas, mask, label = batch[0].to(device=device), batch[1].to(device=device, dtype=torch.bool), \
+                inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device, dtype=torch.bool), \
                                   batch[2].to(device=device)
 
-                pred = model(fas).squeeze()
+                pred = model(inputs)
                 loss = (crit(pred.squeeze(), label) * mask).mean()
 
                 e_loss += loss.item()
@@ -174,8 +174,8 @@ def learn(opt):
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
-                        input1 = fas[im, 0].squeeze()
-                        input2 = fas[im, 1].squeeze()
+                        input1 = inputs[im, 0].squeeze()
+                        input2 = inputs[im, 1].squeeze()
                         add_figure(input1, writer, title='Input 1', label='Infer/Input1', cmap='viridis', epoch=epoch,
                                    text=[f'Mean: {input1.mean():.2f}',
                                          f'Min:  {input1.min():.2f}',
@@ -263,10 +263,10 @@ if __name__ == '__main__':
                 'inferBatchSize': 64,
                 'dataDirectory': './Data/',
                 'outDirectory': './Output/',
-                'nEpochs': 2000,
+                'nEpochs': 1000,
                 'lr': 0.00001,
                 'cuda': True,
-                'threads': 16,
+                'threads': 20,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,

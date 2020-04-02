@@ -158,7 +158,7 @@ class EvalDataset(data.Dataset):
 
         input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
 
-        return input.float().squeeze(), mask.float().squeeze(), label.float().squeeze()
+        return input.float(), mask.float(), label.float()
 
     def __len__(self):
         return self.length()
