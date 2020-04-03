@@ -4,10 +4,10 @@ import torchvision.transforms.functional as TF
 
 from PIL.Image import BILINEAR
 
-import matplotlib
-matplotlib.use('qt5agg')
-import matplotlib.pyplot as plt
-plt.ion()
+# import matplotlib
+# matplotlib.use('qt5agg')
+# import matplotlib.pyplot as plt
+# plt.ion()
 
 
 class TrainDataset(data.Dataset):
@@ -95,20 +95,22 @@ class TrainDataset(data.Dataset):
 
     def __getitem__(self, item):
 
-        in1 = self.in1[:, :, item].squeeze()
-        in2 = self.in2[:, :, item].squeeze()
-        label = self.label[:, :, item].squeeze()
-        mask = self.mask[:, :, item].squeeze()
+        sl = item % self.label.shape[-1]
 
-        in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
-        in1, in2 = self.color_transform(in1, in2)
+        in1 = self.in1[:, :, sl].squeeze()
+        in2 = self.in2[:, :, sl].squeeze()
+        label = self.label[:, :, sl].squeeze()
+        mask = self.mask[:, :, sl].squeeze()
 
-        mask = (mask * 0.8) + 0.2
+        # in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
+        # in1, in2 = self.color_transform(in1, in2)
+
+        # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
 
         input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
 
-        return input.float(), mask.float(), label.float()
+        return input.float(), mask.bool(), label.float()
 
     def __len__(self):
         return self.length
@@ -153,12 +155,12 @@ class EvalDataset(data.Dataset):
         #     image_list[i] = p.clone()
         #
         # in1, in2, mask, label = image_list
-        mask = (mask * 0.8) + 0.2
+        # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
 
         input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
 
-        return input.float(), mask.float(), label.float()
+        return input.float(), mask.bool(), label.float()
 
     def __len__(self):
         return self.length()

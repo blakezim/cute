@@ -62,10 +62,10 @@ def _check_branch(opt, params):
         sys.exit(msg)
 
 
-def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', epoch=0):
+def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', epoch=0, vmin=None, vmax=None):
     font = {'color': 'white', 'size': 16}
     plt.figure()
-    plt.imshow(tensor.squeeze().cpu(), cmap=cmap)
+    plt.imshow(tensor.squeeze().cpu(), cmap=cmap, vmin=vmin, vmax=vmax)
     plt.colorbar()
     plt.axis('off')
     if title:
@@ -134,9 +134,10 @@ def learn(opt):
             inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
 
             optimizer.zero_grad()
-            pred = model(inputs)
+            pred = model(inputs).squeeze()
 
-            loss = (crit(pred.squeeze(), label) * mask).mean()
+            # loss = (crit(pred.squeeze(), label) * mask).mean()
+            loss = crit(pred[mask], label[mask])
             loss.backward()
 
             e_loss += loss.item()
@@ -164,13 +165,13 @@ def learn(opt):
                 inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device, dtype=torch.bool), \
                                   batch[2].to(device=device)
 
-                pred = model(inputs)
-                loss = (crit(pred.squeeze(), label) * mask).mean()
-
+                pred = model(inputs).squeeze()
+                # loss = (crit(pred.squeeze(), label) * mask).mean()
+                loss = crit(pred[mask], label[mask])
                 e_loss += loss.item()
 
-                if iteration == 1:
-                    im = 30
+                if iteration == 3:
+                    im = 63
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
@@ -192,6 +193,7 @@ def learn(opt):
                                text=[f'Mean: {pred_im.mean():.2f}',
                                      f'Min:  {pred_im.min():.2f}',
                                      f'Max:  {pred_im.max():.2f}'],
+                               vmin=0.0, vmax=1.0
                                )
 
                     # Add the CT - not going to change
@@ -202,6 +204,7 @@ def learn(opt):
                                    text=[f'Mean: {stir_im.mean():.2f}',
                                          f'Min:  {stir_im.min():.2f}',
                                          f'Max:  {stir_im.max():.2f}'],
+                                   vmin=0.0, vmax=1.0
                                    )
 
             writer.add_scalar('Infer/Avg. MSE Loss', e_loss / len(testing_data_loader), epoch)
@@ -259,19 +262,19 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 64,
-                'inferBatchSize': 64,
+    trainOpt = {'trainBatchSize': 32,
+                'inferBatchSize': 32,
                 'dataDirectory': './Data/',
                 'outDirectory': './Output/',
                 'nEpochs': 1000,
-                'lr': 0.00001,
+                'lr': 0.0001,
                 'cuda': True,
                 'threads': 20,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,
                 'seed': 223,
-                'crop': 256
+                'crop': None
                 }
 
     evalOpt = {'evalBatchSize': 1024,
