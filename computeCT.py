@@ -171,9 +171,10 @@ def learn(opt):
                 # loss = (crit(pred.squeeze(), label) * mask).mean()
                 loss = crit(pred[mask], label[mask])
                 e_loss += loss.item()
+                b_loss = loss.item()
 
-                if iteration == 3:
-                    im = 63
+                if iteration == int(len(testing_data_loader // 2)) // opt.inferBatchSize:
+                    im = int(len(testing_data_loader // 2)) % opt.inferBatchSize
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
@@ -208,6 +209,7 @@ def learn(opt):
                                          f'Max:  {stir_im.max():.2f}'],
                                    vmin=0.0, vmax=1.0
                                    )
+                    print(f"=> Done with {iteration} / {len(testing_data_loader)}  Batch Loss: {b_loss:.6f}")
 
             writer.add_scalar('Infer/Avg. MSE Loss', e_loss / len(testing_data_loader), epoch)
             print(f"===> Avg. MSE Loss: {e_loss / len(testing_data_loader):.6f}")
@@ -264,8 +266,8 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 32,
-                'inferBatchSize': 32,
+    trainOpt = {'trainBatchSize': 16,
+                'inferBatchSize': 16,
                 'dataDirectory': './Data/',
                 'outDirectory': './Output/',
                 'nEpochs': 1000,
