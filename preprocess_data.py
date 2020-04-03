@@ -37,6 +37,12 @@ def process_data():
     train_masks = torch.cat(train_masks, -1)
     train_label = torch.cat(train_label, -1)
 
+    nz_mask = train_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
+
+    train_input = train_input[:, :, :, nz_mask]
+    train_masks = train_masks[:, :, nz_mask]
+    train_label = train_label[:, :, nz_mask]
+
     print(f'Processing {files[-1].split("/")[-1].split("_")[0]} ... ', end='')
     mat_dict = loadmat(files[-1])
 
@@ -45,6 +51,12 @@ def process_data():
     infer_label = torch.tensor(mat_dict['imsCTreg'])
     infer_masks = torch.tensor(mat_dict['UTEbinaryMaskReg'])
     infer_input = torch.stack((ute1, ute2), 0)
+
+    nz_mask = infer_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
+
+    infer_label = infer_label[:, :, nz_mask]
+    infer_masks = infer_masks[:, :, nz_mask]
+    infer_input = infer_input[:, :, :, nz_mask]
 
     print('done')
 

@@ -110,7 +110,7 @@ def get_loaders(opt):
     train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1])))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
-    input1, input2, mask, label = load_train_data()
+    input1, input2, mask, label = load_infer_data()
 
     infer_dataset = EvalDataset(input1, input2, mask, label, int(label.shape[-1]))
     infer_sampler = SequentialSampler(range(0, int(label.shape[-1])))
@@ -164,8 +164,7 @@ def learn(opt):
         print('===> Evaluating Model')
         with torch.no_grad():
             for iteration, batch in enumerate(testing_data_loader, 1):
-                inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device, dtype=torch.bool), \
-                                  batch[2].to(device=device)
+                inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
 
                 pred = model(inputs).squeeze()
                 # loss = (crit(pred.squeeze(), label) * mask).mean()
@@ -173,7 +172,7 @@ def learn(opt):
                 e_loss += loss.item()
                 b_loss = loss.item()
 
-                if iteration == int(len(testing_data_loader) // 2) // opt.inferBatchSize:
+                if iteration == int(len(testing_data_loader) // 2):
                     im = int(len(testing_data_loader) // 2) % opt.inferBatchSize
 
                     if epoch == 1:
@@ -209,7 +208,7 @@ def learn(opt):
                                          f'Max:  {stir_im.max():.2f}'],
                                    vmin=0.0, vmax=1.0
                                    )
-                    print(f"=> Done with {iteration} / {len(testing_data_loader)}  Batch Loss: {b_loss:.6f}")
+                print(f"=> Done with {iteration} / {len(testing_data_loader)}  Batch Loss: {b_loss:.6f}")
 
             writer.add_scalar('Infer/Avg. MSE Loss', e_loss / len(testing_data_loader), epoch)
             print(f"===> Avg. MSE Loss: {e_loss / len(testing_data_loader):.6f}")

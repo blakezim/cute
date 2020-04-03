@@ -107,6 +107,7 @@ class TrainDataset(data.Dataset):
 
         # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
+        mask = mask >= 0.5
 
         input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
 
@@ -157,6 +158,7 @@ class EvalDataset(data.Dataset):
         # in1, in2, mask, label = image_list
         # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
+        mask = mask >= 0.5
 
         input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
 
