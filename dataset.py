@@ -68,11 +68,10 @@ class TrainDataset(data.Dataset):
 
         image_list = [in1, in2]
 
-        br = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
-        cn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
-        sn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
-
         for i, p in enumerate(image_list):
+            br = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
+            cn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
+            sn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
 
             p_min = p.min()
             p_max = p.max()
@@ -103,7 +102,7 @@ class TrainDataset(data.Dataset):
         mask = self.mask[:, :, sl].squeeze()
 
         # in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
-        # in1, in2 = self.color_transform(in1, in2)
+        in1, in2 = self.color_transform(in1, in2)
 
         # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
