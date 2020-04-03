@@ -127,7 +127,8 @@ def learn(opt):
 
     def train(epoch, scheduler):
         model.train()
-        crit = nn.MSELoss(reduction='none')
+        # crit = nn.MSELoss(reduction='none')
+        crit = nn.MSELoss()
         e_loss = 0.0
 
         for iteration, batch in enumerate(training_data_loader, 1):
@@ -156,7 +157,8 @@ def learn(opt):
 
     def infer(epoch):
         model.eval()
-        crit = nn.MSELoss(reduction='none')
+        # crit = nn.MSELoss(reduction='none')
+        crit = nn.MSELoss()
         e_loss = 0.0
 
         print('===> Evaluating Model')
