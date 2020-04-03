@@ -173,8 +173,8 @@ def learn(opt):
                 e_loss += loss.item()
                 b_loss = loss.item()
 
-                if iteration == int(len(testing_data_loader // 2)) // opt.inferBatchSize:
-                    im = int(len(testing_data_loader // 2)) % opt.inferBatchSize
+                if iteration == int(len(testing_data_loader) // 2) // opt.inferBatchSize:
+                    im = int(len(testing_data_loader) // 2) % opt.inferBatchSize
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
