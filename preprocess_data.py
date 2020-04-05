@@ -106,7 +106,7 @@ def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
             similarity=similarity,
             operator=operator,
             device=device,
-            step_size=0.05,
+            step_size=0.03,
             incompressible=True
         )
 
@@ -150,7 +150,7 @@ def process_data():
         source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
         target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
 
-        deformation = deformable_register(target, source, device=device, niter=500)
+        deformation = deformable_register(target, source, device=device, niter=50)
 
         app_def = so.ApplyGrid.Create(deformation, device=device)
         def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
@@ -187,10 +187,12 @@ def process_data():
     ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
     ute_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
 
+    start_vol = ct_mask.sum() / 1000
+
     source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
     target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
 
-    deformation = deformable_register(target, source, device=device, niter=500)
+    deformation = deformable_register(target, source, device=device, niter=50)
 
     app_def = so.ApplyGrid.Create(deformation, device=device)
     def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
@@ -198,6 +200,8 @@ def process_data():
     def_mask = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0)))
 
     ct_mask = def_mask.data.squeeze().cpu().numpy()
+    print(f'Starting Volume = {start_vol}')
+    print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
     ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=10))
 
     infer_input = torch.stack((ute1, ute2), 0)
