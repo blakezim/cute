@@ -259,7 +259,7 @@ def learn(opt):
     model = nn.DataParallel(model)
 
     optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-5, momentum=0.8, nesterov=True)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=50, verbose=True, factor=0.5,
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=50, verbose=True, factor=0.1,
                                                      threshold=5e-3, cooldown=200, min_lr=1e-6)
 
     print("===> Beginning Training")
@@ -408,8 +408,8 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 32,
-                'inferBatchSize': 32,
+    trainOpt = {'trainBatchSize': 28,
+                'inferBatchSize': 28,
                 'dataDirectory': './Data/',
                 'outDirectory': './Output/',
                 'nEpochs': 1000,
@@ -435,6 +435,6 @@ if __name__ == '__main__':
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    # learn(trainOpt)
-    eval(evalOpt)
+    learn(trainOpt)
+    # eval(evalOpt)
     print('All Done')
