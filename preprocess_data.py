@@ -67,9 +67,12 @@ def affine_register(target, source, converge=1.0, niter=300, device='cpu', rigid
 
 def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
 
-    gaussian_blur = so.Gaussian.Create(1, 10, 4, dim=3, device=device)
+    gaussian_blur = so.Gaussian.Create(1, 25, 10, dim=3, device=device)
     target = gaussian_blur(target)
     source = gaussian_blur(source)
+    #
+    # source = (source - source.min()) / (source.max() - source.min())
+    # target = (target - target.min()) / (target.max() - target.min())
 
     deformation = target.clone()
     deformation.set_to_identity_lut_()
@@ -78,7 +81,9 @@ def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
     # Create a grid composer
     composer = so.ComposeGrids(device=device, dtype=torch.float32, padding_mode='border')
 
-    for s in [4, 2]:
+    steps = [0.03, 0.05]
+
+    for i, s in enumerate([4, 2]):
 
         scale_source = source.set_size(source.size // s, inplace=False)
         scale_target = target.set_size(target.size // s, inplace=False)
@@ -106,7 +111,7 @@ def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
             similarity=similarity,
             operator=operator,
             device=device,
-            step_size=0.03,
+            step_size=steps[i],
             incompressible=True
         )
 
@@ -129,7 +134,7 @@ def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
 def process_data():
     data_path = './Data/RawData/'
     out_path = './Data/PreProcessedData/'
-    files = sorted(glob.glob(f'{data_path}/*'))
+    files = sorted(glob.glob(f'{data_path}/*.mat'))
 
     train_input = []
     train_masks = []
@@ -142,15 +147,15 @@ def process_data():
         ute1 = torch.tensor(mat_dict['Ims1reg'])
         ute2 = torch.tensor(mat_dict['Ims2reg'])
         ct = torch.tensor(mat_dict['imsCTreg'])
-        ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
-        ute_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+        ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+        ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
 
         start_vol = ct_mask.sum() / 1000
 
         source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
         target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
 
-        deformation = deformable_register(target, source, device=device, niter=50)
+        deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
 
         app_def = so.ApplyGrid.Create(deformation, device=device)
         def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
@@ -184,15 +189,15 @@ def process_data():
     ute1 = torch.tensor(mat_dict['Ims1reg'])
     ute2 = torch.tensor(mat_dict['Ims2reg'])
     ct = torch.tensor(mat_dict['imsCTreg'])
-    ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
-    ute_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+    ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+    ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
 
     start_vol = ct_mask.sum() / 1000
 
     source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
     target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
 
-    deformation = deformable_register(target, source, device=device, niter=50)
+    deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
 
     app_def = so.ApplyGrid.Create(deformation, device=device)
     def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))

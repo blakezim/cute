@@ -18,10 +18,7 @@ from models import unet_model
 
 # from VNet.vNetModel import vnet_model
 # from collections import OrderedDict
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
-plt.ion()
+
 
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -49,17 +46,34 @@ def _get_branch(opt):
     opt.git_hash = hash
 
 
-def _check_branch(opt, params):
+def _check_branch(opt, saved_dict, model):
     """ When performing eval, check th git branch and commit that was used to generate the .pt file"""
 
     # Check the current branch and hash
     _get_branch(opt)
 
-    if params.git_branch != opt.git_branch or params.git_hash != opt.git_hash:
-        msg = 'You are not on the right branch or commit. Please run the following in the repository: \n'
+    try:
+        if opt.cuda:
+            device = torch.device('cuda')
+            model = model.to(device=device)
+            model = nn.DataParallel(model)
+            params = torch.load(f'{opt.model_dir}{opt.ckpt}')
+            model.load_state_dict(params['state_dict'])
+        else:
+            device = torch.device('cpu')
+            params = torch.load(f'{opt.model_dir}{opt.ckpt}', map_location=lambda storage, loc: storage)
+            model.load_state_dict(params['state_dict'])
+    except:
+        raise Exception(f'The checkpoint {opt.ckpt} could not be loaded into the given model.')
+
+    if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
+        msg = 'The model loaded, but you are not on the same branch or commit.'
+        msg += 'To check out the right branch, run the following in the repository: \n'
         msg += f'git checkout {params.git_branch[0]}\n'
         msg += f'git revert {params.git_hash[0]}'
-        sys.exit(msg)
+        raise Warning(msg)
+
+    return model, device
 
 
 def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', epoch=0, vmin=None, vmax=None):
@@ -120,6 +134,12 @@ def get_loaders(opt):
 
 
 def learn(opt):
+
+    import matplotlib
+    matplotlib.use('agg')
+    import matplotlib.pyplot as plt
+    plt.ion()
+
     def checkpoint(state, opt, epoch):
         path = f'{opt.outDirectory}/saves/{opt.timestr}/epoch_{epoch:05d}_model.pth'
         torch.save(state, path)
@@ -261,16 +281,139 @@ def learn(opt):
 
 
 def eval(opt):
-    pass
+
+    import matplotlib
+    matplotlib.use('qt5agg')
+    import matplotlib.pyplot as plt
+    plt.ion()
+
+    files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
+
+    print('===> Loading Data ... ', end='')
+    mat_dict = loadmat(files[-1])
+
+    ute1 = torch.tensor(mat_dict['Ims1reg'])
+    ute2 = torch.tensor(mat_dict['Ims2reg'])
+    ct = torch.tensor(mat_dict['imsCTreg'])
+    ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+
+    infer_dataset = EvalDataset(ute1, ute2, ct_mask, ct, int(ct.shape[-1]))
+    infer_sampler = SequentialSampler(range(0, int(ct.shape[-1])))
+    eval_loader = DataLoader(infer_dataset, opt.evalBatchSize, sampler=infer_sampler, num_workers=opt.threads)
+    print('done')
+
+    print('===> Loading Model ... ', end='')
+    if not opt.ckpt:
+        timestamps = sorted(glob.glob(f'{opt.model_dir}/*'))
+        if not timestamps:
+            raise Exception(f'No save directories found in {opt.model_dir}')
+        lasttime = timestamps[-1].split('/')[-1]
+        models = sorted(glob.glob(f'{opt.model_dir}/{lasttime}/*'))
+        if not models:
+            raise Exception(f'No models found in the last run ({opt.model_dir}{lasttime}/')
+        model_file = models[-1].split('/')[-1]
+        opt.ckpt = f'{lasttime}/{model_file}'
+
+    model = unet_model.UNet(2, 1)
+    saved_dict = SimpleNamespace(**torch.load(f'{opt.model_dir}{opt.ckpt}'))
+    model, device = _check_branch(opt, saved_dict, model)
+    print('done')
+
+    model.eval()
+    crit = nn.MSELoss()
+    e_loss = 0.0
+    preds = []
+
+    print('===> Evaluating Model')
+    with torch.no_grad():
+        for iteration, batch in enumerate(eval_loader, 1):
+            inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
+
+            pred = model(inputs).squeeze()
+            preds.append(pred.clone())
+
+            loss = crit(pred[mask], label[mask])
+            e_loss += loss.item()
+            b_loss = loss.item()
+
+            print(f"=> Done with {iteration} / {len(eval_loader)}  Batch Loss: {b_loss:.6f}")
+
+        print(f"===> Avg. MSE Loss: {e_loss / len(eval_loader):.6f}")
+
+    pred_vol = torch.cat(preds, dim=0)
+    pred_vol = (pred_vol * 4000.0) - 1000.0
+    pred_vol[pred_vol < -1000.0] = -1000
+    pred_vol[pred_vol > 3000.0] = 3000.0
+    pred_vol = pred_vol.permute(1, 2, 0)
+
+    s = 300
+    save_fig = True
+    fig_dir = f'./Output/figures/{opt.ckpt.split("/")[0]}/'
+
+    if not os.path.exists(fig_dir):
+        os.makedirs(fig_dir)
+
+    in1_im = ute1[:, :, s].squeeze().cpu()
+    in2_im = ute2[:, :, s].squeeze().cpu()
+    ct_im = ct[:, :, s].squeeze().cpu()
+    pred_im = pred_vol[:, :, s].squeeze().cpu()
+
+    plt.figure()
+    plt.imshow(in1_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
+    plt.axis('off')
+    plt.title('UTE 1')
+    plt.colorbar()
+    if save_fig:
+        plt.savefig(f'{fig_dir}ute1.png', dpi=600, bbox_inches='tight', pad_inches=0,
+                    transparaent=True, facecolor=[0, 0, 0, 0])
+
+    plt.figure()
+    plt.imshow(in2_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
+    plt.axis('off')
+    plt.title('UTE 2')
+    plt.colorbar()
+    if save_fig:
+        plt.savefig(f'{fig_dir}ute2.png', dpi=600, bbox_inches='tight', pad_inches=0,
+                    transparaent=True, facecolor=[0, 0, 0, 0])
+
+    plt.figure()
+    plt.imshow(pred_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
+    plt.axis('off')
+    plt.title('Predicted CT')
+    plt.colorbar()
+    if save_fig:
+        plt.savefig(f'{fig_dir}pred_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
+                    transparaent=True, facecolor=[0, 0, 0, 0])
+
+    plt.figure()
+    plt.imshow(ct_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
+    plt.axis('off')
+    plt.title('Real CT')
+    plt.colorbar()
+    if save_fig:
+        plt.savefig(f'{fig_dir}real_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
+                    transparaent=True, facecolor=[0, 0, 0, 0])
+
+    # import CAMP.Core as core
+    # import CAMP.FileIO as io
+    # pred_vol_out = core.StructuredGrid(pred_vol.shape, device=device, tensor=pred_vol.unsqueeze(0))
+    # io.SaveITKFile(pred_vol_out, )
+
+    # Generate the dictionary to save
+    out_dict = {
+        'pred_CT': pred_vol.cpu().numpy(),
+    }
+
+    savemat(f'{fig_dir}/NN_Output.mat', out_dict)
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 16,
-                'inferBatchSize': 16,
+    trainOpt = {'trainBatchSize': 32,
+                'inferBatchSize': 32,
                 'dataDirectory': './Data/',
                 'outDirectory': './Output/',
                 'nEpochs': 1000,
-                'lr': 0.0001,
+                'lr': 0.0005,
                 'cuda': True,
                 'threads': 20,
                 'resume': False,
@@ -280,18 +423,18 @@ if __name__ == '__main__':
                 'crop': None
                 }
 
-    evalOpt = {'evalBatchSize': 1024,
-               'dataDirectory': './Data/',
-               'model_dir': './Output/saves/',
+    evalOpt = {'evalBatchSize': 16,
+               'dataDirectory': './Data/RawData/',
+               'model_dir': '/hdscratch/ucair/CUTE/Output/saves/2020-04-05-192538/',
                'outDirectory': './Output/Predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': None
+               'ckpt': 'epoch_00650_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    learn(trainOpt)
-    # eval(evalOpt)
+    # learn(trainOpt)
+    eval(evalOpt)
     print('All Done')
