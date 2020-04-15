@@ -1,3 +1,4 @@
+import os
 import torch
 import glob
 import numpy as np
@@ -132,8 +133,12 @@ def deformable_register(target, source, converge=1.0, niter=300, device='cpu'):
 
 
 def process_data():
-    data_path = './Data/RawData/'
+    data_path = '/hdscratch/ucair/CUTE/Data/RawData/'
     out_path = './Data/PreProcessedData/'
+
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
     files = sorted(glob.glob(f'{data_path}/*.mat'))
 
     train_input = []
@@ -183,7 +188,7 @@ def process_data():
         # ct_mask = def_mask.data.squeeze().cpu().numpy()
         # print(f'Starting Volume = {start_vol}')
         # print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
-        ct_mask = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
+        # ct_mask = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
 
         train_input.append(torch.stack((ute1, ute2), 0))
         train_masks.append(ct_mask)
@@ -209,7 +214,7 @@ def process_data():
     # ute2 = torch.tensor(mat_dict['Ims2reg'])
     # ct = torch.tensor(mat_dict['imsCTreg'])
     # ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
-    ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+    infer_masks = torch.tensor(mat_dict['CTbinaryMaskReg'])
 
     # ute1 = core.StructuredGrid(ute1.shape, device=device, tensor=ute1.unsqueeze(0))
     # ute2 = core.StructuredGrid(ute2.shape, device=device, tensor=ute2.unsqueeze(0))
@@ -246,7 +251,7 @@ def process_data():
     ute1 = torch.tensor(mat_dict['Ims1reg'])
     ute2 = torch.tensor(mat_dict['Ims2reg'])
     infer_label = torch.tensor(mat_dict['imsCTreg'])
-    infer_masks = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
+    # infer_masks = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
     infer_input = torch.stack((ute1, ute2), 0)
 
     nz_mask = infer_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)

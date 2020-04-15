@@ -18,10 +18,8 @@ from models import unet_model
 
 # from VNet.vNetModel import vnet_model
 # from collections import OrderedDict
-
-
-import torch.multiprocessing
-torch.multiprocessing.set_sharing_strategy('file_system')
+# import torch.multiprocessing
+# torch.multiprocessing.set_sharing_strategy('file_system')
 
 from scipy.io import loadmat, savemat
 from types import SimpleNamespace
@@ -66,12 +64,12 @@ def _check_branch(opt, saved_dict, model):
     except:
         raise Exception(f'The checkpoint {opt.ckpt} could not be loaded into the given model.')
 
-    # if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
-    #     msg = 'The model loaded, but you are not on the same branch or commit.'
-    #     msg += 'To check out the right branch, run the following in the repository: \n'
-    #     msg += f'git checkout {params.git_branch[0]}\n'
-    #     msg += f'git revert {params.git_hash[0]}'
-    #     raise Warning(msg)
+    if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
+        msg = 'The model loaded, but you are not on the same branch or commit.'
+        msg += 'To check out the right branch, run the following in the repository: \n'
+        msg += f'git checkout {params.git_branch[0]}\n'
+        msg += f'git revert {params.git_hash[0]}'
+        raise Warning(msg)
 
     return model, device
 
@@ -96,38 +94,35 @@ def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', ep
     plt.close('all')
 
 
-def load_infer_data():
+def load_infer_data(opt):
 
     # load the training data
-    data_path = './Data/PreProcessedData/'
-
-    infer_input = torch.load(f'{data_path}/infer_input.pt')
-    infer_label = torch.load(f'{data_path}/infer_label.pt')
-    infer_masks = torch.load(f'{data_path}/infer_masks.pt')
+    infer_input = torch.load(f'{opt.dataDirectory}/infer_input.pt')
+    infer_label = torch.load(f'{opt.dataDirectory}/infer_label.pt')
+    infer_masks = torch.load(f'{opt.dataDirectory}/infer_masks.pt')
 
     return infer_input[0].squeeze(), infer_input[1].squeeze(), infer_masks, infer_label
 
 
-def load_train_data():
-    # load the inference data
-    data_path = './Data/PreProcessedData/'
+def load_train_data(opt):
 
-    train_input = torch.load(f'{data_path}/train_input.pt')
-    train_label = torch.load(f'{data_path}/train_label.pt')
-    train_masks = torch.load(f'{data_path}/train_masks.pt')
+    # load the inference data
+    train_input = torch.load(f'{opt.dataDirectory}/train_input.pt')
+    train_label = torch.load(f'{opt.dataDirectory}/train_label.pt')
+    train_masks = torch.load(f'{opt.dataDirectory}/train_masks.pt')
 
     return train_input[0].squeeze(), train_input[1].squeeze(), train_masks, train_label
 
 
 def get_loaders(opt):
 
-    input1, input2, mask, label = load_train_data()
+    input1, input2, mask, label = load_train_data(opt)
 
     train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]), opt.crop)
     train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1])))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
-    input1, input2, mask, label = load_infer_data()
+    input1, input2, mask, label = load_infer_data(opt)
 
     infer_dataset = EvalDataset(input1, input2, mask, label, int(label.shape[-1]))
     infer_sampler = SequentialSampler(range(0, int(label.shape[-1])))
@@ -151,7 +146,7 @@ def learn(opt):
     def train(epoch, scheduler):
         model.train()
         # crit = nn.MSELoss(reduction='none')
-        crit = nn.MSELoss()
+        crit = nn.L1Loss()
         e_loss = 0.0
 
         for iteration, batch in enumerate(training_data_loader, 1):
@@ -181,7 +176,7 @@ def learn(opt):
     def infer(epoch):
         model.eval()
         # crit = nn.MSELoss(reduction='none')
-        crit = nn.MSELoss()
+        crit = nn.L1Loss()
         e_loss = 0.0
 
         print('===> Evaluating Model')
@@ -262,7 +257,7 @@ def learn(opt):
     model = nn.DataParallel(model)
 
     optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-5, momentum=0.8, nesterov=True)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=50, verbose=True, factor=0.1,
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, verbose=True, factor=0.5,
                                                      threshold=5e-3, cooldown=200, min_lr=1e-6)
 
     print("===> Beginning Training")
@@ -413,12 +408,12 @@ def eval(opt):
 if __name__ == '__main__':
     trainOpt = {'trainBatchSize': 28,
                 'inferBatchSize': 28,
-                'dataDirectory': './Data/',
-                'outDirectory': './Output/',
+                'dataDirectory': '../Data/PreProcessedData',
+                'outDirectory': '../Output/',
                 'nEpochs': 1000,
-                'lr': 0.0005,
+                'lr': 0.0002,
                 'cuda': True,
-                'threads': 0,
+                'threads': 20,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,
@@ -438,6 +433,6 @@ if __name__ == '__main__':
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    # learn(trainOpt)
-    eval(evalOpt)
+    learn(trainOpt)
+    # eval(evalOpt)
     print('All Done')

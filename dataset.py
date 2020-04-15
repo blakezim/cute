@@ -28,8 +28,8 @@ class TrainDataset(data.Dataset):
         hflip = torch.rand(1).item() > 0.5
         deg = torch.LongTensor(1).random_(-20, 20).item()
         scale = torch.FloatTensor(1).uniform_(0.8, 1.2)
-        x_crop = torch.randint(low=self.crop // 2, high=in1.shape[0] - self.crop // 2, size=(1,))
-        y_crop = torch.randint(low=self.crop // 2, high=in1.shape[1] - self.crop // 2, size=(1,))
+        # x_crop = torch.randint(low=self.crop // 2, high=in1.shape[0] - self.crop // 2, size=(1,))
+        # y_crop = torch.randint(low=self.crop // 2, high=in1.shape[1] - self.crop // 2, size=(1,))
 
         # source = list(torch.unbind(source))
 
@@ -50,7 +50,7 @@ class TrainDataset(data.Dataset):
 
             p = TF.affine(p, deg, scale=scale, translate=(0, 0), shear=0, resample=BILINEAR)
             p = TF.to_tensor(p).squeeze()
-            p = p[x_crop - self.crop // 2:x_crop + self.crop // 2, y_crop - self.crop // 2:y_crop + self.crop // 2]
+            # p = p[x_crop - self.crop // 2:x_crop + self.crop // 2, y_crop - self.crop // 2:y_crop + self.crop // 2]
             if dtype == torch.int64:
                 p = p.round()
             p = p.to(dtype=dtype)
@@ -69,9 +69,9 @@ class TrainDataset(data.Dataset):
         image_list = [in1, in2]
 
         for i, p in enumerate(image_list):
-            br = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
-            cn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
-            sn = torch.FloatTensor(1).uniform_(-0.05, 0.05) + 1
+            br = torch.FloatTensor(1).uniform_(-0.01, 0.01) + 1
+            cn = torch.FloatTensor(1).uniform_(-0.01, 0.01) + 1
+            sn = torch.FloatTensor(1).uniform_(-0.01, 0.01) + 1
 
             p_min = p.min()
             p_max = p.max()
@@ -101,10 +101,9 @@ class TrainDataset(data.Dataset):
         label = self.label[:, :, sl].squeeze()
         mask = self.mask[:, :, sl].squeeze()
 
-        # in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
+        in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
         in1, in2 = self.color_transform(in1, in2)
 
-        # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
         mask = mask >= 0.5
 
@@ -134,28 +133,6 @@ class EvalDataset(data.Dataset):
         label = self.label[:, :, item].squeeze()
         mask = self.mask[:, :, item].squeeze()
 
-        # image_list = [in1, in2, mask, label]
-        #
-        # for i, p in enumerate(image_list):
-        #     dtype = p.dtype
-        #
-        #     p_min = p.min()
-        #     p_max = p.max()
-        #
-        #     p = (p - p_min) / ((p_max - p_min) + 0.001)
-        #
-        #     p = TF.to_pil_image(p.float().clone())
-        #     p = TF.center_crop(p, self.crop)
-        #
-        #     p = TF.to_tensor(p).clone()
-        #     p = (p * ((p_max - p_min) + 0.001)) + p_min
-        #     if dtype == torch.int64:
-        #         p = p.round()
-        #     p = p.to(dtype=dtype)
-        #     image_list[i] = p.clone()
-        #
-        # in1, in2, mask, label = image_list
-        # mask = (mask * 2.95) + 0.05
         label = (label + 1000.0) / 4000.0
         mask = mask >= 0.5
 

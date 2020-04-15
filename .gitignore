@@ -28,3 +28,5 @@ Data/
 Data/*
 Output/
 Output/*
+Slurm/
+Slurm/*
