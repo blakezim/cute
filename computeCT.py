@@ -61,23 +61,26 @@ def _check_branch(opt, saved_dict, model):
             model.load_state_dict(params['state_dict'])
         else:
             device = torch.device('cpu')
-            params = torch.load(f'{opt.model_dir}{opt.ckpt}', map_location=lambda storage, loc: storage)
+            params = torch.load(f'{opt.model_dir}{opt.ckpt}', map_location='cpu')
             model.load_state_dict(params['state_dict'])
     except:
         raise Exception(f'The checkpoint {opt.ckpt} could not be loaded into the given model.')
 
-    if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
-        msg = 'The model loaded, but you are not on the same branch or commit.'
-        msg += 'To check out the right branch, run the following in the repository: \n'
-        msg += f'git checkout {params.git_branch[0]}\n'
-        msg += f'git revert {params.git_hash[0]}'
-        raise Warning(msg)
+    # if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
+    #     msg = 'The model loaded, but you are not on the same branch or commit.'
+    #     msg += 'To check out the right branch, run the following in the repository: \n'
+    #     msg += f'git checkout {params.git_branch[0]}\n'
+    #     msg += f'git revert {params.git_hash[0]}'
+    #     raise Warning(msg)
 
     return model, device
 
 
 def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', epoch=0, vmin=None, vmax=None):
-    font = {'color': 'white', 'size': 16}
+
+    import matplotlib.pyplot as plt
+
+    font = {'color': 'white', 'size': 20}
     plt.figure()
     plt.imshow(tensor.squeeze().cpu(), cmap=cmap, vmin=vmin, vmax=vmax)
     plt.colorbar()
@@ -87,7 +90,7 @@ def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', ep
     if text:
         if type(text) == list:
             for i, t in enumerate(text, 1):
-                plt.text(3, i*10, t, fontdict=font)
+                plt.text(160, (i * 40) + 200, t, fontdict=font)
 
     writer.add_figure(label, plt.gcf(), epoch)
     plt.close('all')
@@ -136,7 +139,7 @@ def get_loaders(opt):
 def learn(opt):
 
     import matplotlib
-    matplotlib.use('agg')
+    matplotlib.use('qt5agg')
     import matplotlib.pyplot as plt
     plt.ion()
 
@@ -348,7 +351,7 @@ def eval(opt):
 
     s = 300
     save_fig = True
-    fig_dir = f'./Output/figures/{opt.ckpt.split("/")[0]}/'
+    fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
 
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
@@ -415,7 +418,7 @@ if __name__ == '__main__':
                 'nEpochs': 1000,
                 'lr': 0.0005,
                 'cuda': True,
-                'threads': 20,
+                'threads': 0,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,
@@ -425,16 +428,16 @@ if __name__ == '__main__':
 
     evalOpt = {'evalBatchSize': 16,
                'dataDirectory': './Data/RawData/',
-               'model_dir': '/hdscratch/ucair/CUTE/Output/saves/2020-04-05-192538/',
+               'model_dir': '/home/sci/blakez/ucair/CUTE/Output/saves/2020-04-11-085151/',
                'outDirectory': './Output/Predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': 'epoch_00650_model.pth'
+               'ckpt': 'epoch_00050_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    learn(trainOpt)
-    # eval(evalOpt)
+    # learn(trainOpt)
+    eval(evalOpt)
     print('All Done')

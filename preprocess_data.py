@@ -22,7 +22,7 @@ device = 'cuda:1'
 
 def affine_register(target, source, converge=1.0, niter=300, device='cpu', rigid=True):
 
-    gaussian_blur = so.Gaussian.Create(1, 10, 2, dim=3, device=device)
+    gaussian_blur = so.Gaussian.Create(1, 25, 15, dim=3, device=device)
     target = gaussian_blur(target)
     source = gaussian_blur(source)
 
@@ -140,36 +140,55 @@ def process_data():
     train_masks = []
     train_label = []
 
-    for skull in files[:-1]:
+    for i, skull in enumerate(files[:-1]):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
 
         ute1 = torch.tensor(mat_dict['Ims1reg'])
         ute2 = torch.tensor(mat_dict['Ims2reg'])
         ct = torch.tensor(mat_dict['imsCTreg'])
-        ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+        # ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
         ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
 
-        start_vol = ct_mask.sum() / 1000
+        # if i == 1:
+        #     source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
+        #     target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
+        #
+        #     affine = affine_register(target, source, device=device, niter=100, converge=10.0)
+        #     app_def = so.AffineTransform.Create(affine, device=device)
+        #     def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
+        #     io.SaveITKFile(def_ct, f'/home/sci/blakez/ct_skull{i}_def.nii.gz')
 
-        source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
-        target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
+        # start_vol = ct_mask.sum() / 1000
 
-        deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
+        # ute1 = core.StructuredGrid(ute1.shape, device=device, tensor=ute1.unsqueeze(0))
+        # ute2 = core.StructuredGrid(ute2.shape, device=device, tensor=ute2.unsqueeze(0))
+        # ct = core.StructuredGrid(ct.shape, device=device, tensor=ct.unsqueeze(0))
+        # ct_mask = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
 
-        app_def = so.ApplyGrid.Create(deformation, device=device)
-        def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
-        app_def = so.ApplyGrid.Create(deformation, interp_mode='nearest', device=device)
-        def_mask = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0)))
+        # io.SaveITKFile(ute1, f'/home/sci/blakez/ute1_skull{i}.nii.gz')
+        # io.SaveITKFile(ute2, f'/home/sci/blakez/ute2_skull{i}.nii.gz')
+        # io.SaveITKFile(ct, f'/home/sci/blakez/ct_skull{i}.nii.gz')
+        # io.SaveITKFile(ct_mask, f'/home/sci/blakez/ct_mask_skull{i}.nii.gz')
 
-        ct_mask = def_mask.data.squeeze().cpu().numpy()
-        print(f'Starting Volume = {start_vol}')
-        print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=10))
+
+        #
+        # deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
+        #
+        # app_def = so.ApplyGrid.Create(deformation, device=device)
+        # def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
+        # app_def = so.ApplyGrid.Create(deformation, interp_mode='nearest', device=device)
+        # def_mask = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0)))
+        #
+        # ct_mask = def_mask.data.squeeze().cpu().numpy()
+        # print(f'Starting Volume = {start_vol}')
+        # print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
+        ct_mask = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
 
         train_input.append(torch.stack((ute1, ute2), 0))
         train_masks.append(ct_mask)
-        train_label.append(def_ct.data.squeeze().cpu())
+        train_label.append(ct)
+        # train_label.append(def_ct.data.squeeze().cpu())
 
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... done')
 
@@ -186,38 +205,49 @@ def process_data():
     print(f'Processing {files[-1].split("/")[-1].split("_")[0]} ... ')
     mat_dict = loadmat(files[-1])
 
-    ute1 = torch.tensor(mat_dict['Ims1reg'])
-    ute2 = torch.tensor(mat_dict['Ims2reg'])
-    ct = torch.tensor(mat_dict['imsCTreg'])
-    ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
-    ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
-
-    start_vol = ct_mask.sum() / 1000
-
-    source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
-    target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
-
-    deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
-
-    app_def = so.ApplyGrid.Create(deformation, device=device)
-    def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
-    app_def = so.ApplyGrid.Create(deformation, interp_mode='nearest', device=device)
-    def_mask = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0)))
-
-    ct_mask = def_mask.data.squeeze().cpu().numpy()
-    print(f'Starting Volume = {start_vol}')
-    print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
-    ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=10))
-
-    infer_input = torch.stack((ute1, ute2), 0)
-    infer_masks = ct_mask
-    infer_label = def_ct.data.squeeze().cpu()
-
     # ute1 = torch.tensor(mat_dict['Ims1reg'])
     # ute2 = torch.tensor(mat_dict['Ims2reg'])
-    # infer_label = torch.tensor(mat_dict['imsCTreg'])
-    # infer_masks = torch.tensor(binary_dilation(mat_dict['UTEbinaryMaskReg'], iterations=10))
+    # ct = torch.tensor(mat_dict['imsCTreg'])
+    # ute_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+    ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+
+    # ute1 = core.StructuredGrid(ute1.shape, device=device, tensor=ute1.unsqueeze(0))
+    # ute2 = core.StructuredGrid(ute2.shape, device=device, tensor=ute2.unsqueeze(0))
+    # ct = core.StructuredGrid(ct.shape, device=device, tensor=ct.unsqueeze(0))
+    # ct_mask = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
+    #
+    # io.SaveITKFile(ute1, '/home/sci/blakez/ute1_skull2.nii.gz')
+    # io.SaveITKFile(ute2, '/home/sci/blakez/ute2_skull2.nii.gz')
+    # io.SaveITKFile(ct, '/home/sci/blakez/ct_skull2.nii.gz')
+    # io.SaveITKFile(ct_mask, '/home/sci/blakez/ct_mask_skull2.nii.gz')
+
+    # start_vol = ct_mask.sum() / 1000
+    #
+    # source = core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0))
+    # target = core.StructuredGrid(ute_mask.shape, device=device, tensor=ute_mask.unsqueeze(0))
+    #
+    # deformation = deformable_register(target, source, device=device, niter=100, converge=10.0)
+    #
+    # app_def = so.ApplyGrid.Create(deformation, device=device)
+    # def_ct = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct.unsqueeze(0)))
+    # app_def = so.ApplyGrid.Create(deformation, interp_mode='nearest', device=device)
+    # def_mask = app_def(core.StructuredGrid(ct_mask.shape, device=device, tensor=ct_mask.unsqueeze(0)))
+    #
+    # ct_mask = def_mask.data.squeeze().cpu().numpy()
+    # print(f'Starting Volume = {start_vol}')
+    # print(f'Ending Volume = {np.sum(ct_mask) / 1000}')
+    # ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=10))
+
     # infer_input = torch.stack((ute1, ute2), 0)
+    # infer_masks = ct_mask
+    # infer_label = ct
+    # infer_label = def_ct.data.squeeze().cpu()
+
+    ute1 = torch.tensor(mat_dict['Ims1reg'])
+    ute2 = torch.tensor(mat_dict['Ims2reg'])
+    infer_label = torch.tensor(mat_dict['imsCTreg'])
+    infer_masks = torch.tensor(binary_dilation(ct_mask.numpy(), iterations=10))
+    infer_input = torch.stack((ute1, ute2), 0)
 
     nz_mask = infer_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
 
