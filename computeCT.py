@@ -118,8 +118,8 @@ def get_loaders(opt):
 
     input1, input2, mask, label = load_train_data(opt)
 
-    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]), opt.crop)
-    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1])))
+    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 10, opt.crop)
+    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 10))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
     input1, input2, mask, label = load_infer_data(opt)
@@ -134,7 +134,7 @@ def get_loaders(opt):
 def learn(opt):
 
     import matplotlib
-    matplotlib.use('qt5agg')
+    matplotlib.use('agg')
     import matplotlib.pyplot as plt
     plt.ion()
 
@@ -406,8 +406,8 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 28,
-                'inferBatchSize': 28,
+    trainOpt = {'trainBatchSize': 32,
+                'inferBatchSize': 32,
                 'dataDirectory': '../Data/PreProcessedData',
                 'outDirectory': '../Output/',
                 'nEpochs': 1000,
