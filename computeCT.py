@@ -118,8 +118,8 @@ def get_loaders(opt):
 
     input1, input2, mask, label = load_train_data(opt)
 
-    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 5, opt.crop)
-    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 5))
+    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 2, opt.crop)
+    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 2))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
     input1, input2, mask, label = load_infer_data(opt)
@@ -267,7 +267,7 @@ def learn(opt):
     for epoch in epochs:
         print("===> Learning Rate = {}".format(optimizer.param_groups[0]['lr']))
         train(epoch, scheduler)
-        if epoch % 50 == 0:
+        if epoch % 10 == 0:
             checkpoint({
                 'epoch': epoch,
                 'scheduler': opt.scheduler,
@@ -408,12 +408,12 @@ def eval(opt):
 if __name__ == '__main__':
     trainOpt = {'trainBatchSize': 32,
                 'inferBatchSize': 32,
-                'dataDirectory': '../Data/PreProcessedData',
+                'dataDirectory': '../Data/PreProcessedData/Label005Data/',
                 'outDirectory': '../Output/',
                 'nEpochs': 1000,
-                'lr': 0.0002,
+                'lr': 0.0001,
                 'cuda': True,
-                'threads': 20,
+                'threads': 6,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,
