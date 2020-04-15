@@ -118,8 +118,8 @@ def get_loaders(opt):
 
     input1, input2, mask, label = load_train_data(opt)
 
-    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 10, opt.crop)
-    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 10))
+    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 5, opt.crop)
+    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 5))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
     input1, input2, mask, label = load_infer_data(opt)
@@ -256,9 +256,9 @@ def learn(opt):
     model = model.to(device)
     model = nn.DataParallel(model)
 
-    optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-5, momentum=0.8, nesterov=True)
+    optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-6, momentum=0.9, nesterov=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, verbose=True, factor=0.5,
-                                                     threshold=5e-3, cooldown=200, min_lr=1e-6)
+                                                     threshold=5e-3, cooldown=75, min_lr=1e-6)
 
     print("===> Beginning Training")
 
