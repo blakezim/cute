@@ -99,7 +99,7 @@ class TrainDataset(data.Dataset):
         in1 = self.in1[:, :, sl].squeeze()
         in2 = self.in2[:, :, sl].squeeze()
         label = self.label[:, :, sl].squeeze()
-        mask = self.mask[:, :, sl].squeeze()
+        mask = self.mask[:, :, sl].squeeze().float()
 
         in1, in2, mask, label = self.spatial_transform(in1, in2, mask, label)
         in1, in2 = self.color_transform(in1, in2)

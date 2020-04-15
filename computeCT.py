@@ -406,10 +406,10 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 32,
-                'inferBatchSize': 32,
-                'dataDirectory': '../Data/PreProcessedData/Label005Data/',
-                'outDirectory': '../Output/',
+    trainOpt = {'trainBatchSize': 15,
+                'inferBatchSize': 15,
+                'dataDirectory': './Data/PreProcessedData/Label005Data/',
+                'outDirectory': './Output/',
                 'nEpochs': 1000,
                 'lr': 0.0001,
                 'cuda': True,
