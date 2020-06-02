@@ -1,6 +1,7 @@
 import os
 import torch
 import glob
+import argparse
 import numpy as np
 import torch.optim as optim
 
@@ -18,7 +19,17 @@ import CAMP.StructuredGridTools as st
 import CAMP.UnstructuredGridOperators as uo
 import CAMP.StructuredGridOperators as so
 
+
+parser = argparse.ArgumentParser(description='Multi-Flip Ange T1 Prediction Data Pre-Processing')
+
+parser.add_argument('-d', '--data_path', type=str, default='/hdscratch/ucair/CUTE/Data/RawData2/',
+                    help='Raw Data Path')
+parser.add_argument('-o', '--out_path', type=str, default='./Data/PreProcessedData/Label005Data/',
+                    help='Path to save data')
+opt = parser.parse_args()
+
 device = 'cuda:1'
+
 
 def process_training_data(files):
 
@@ -30,30 +41,30 @@ def process_training_data(files):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
 
-        ute1 = torch.tensor(mat_dict['Ims1reg'])
-        ute2 = torch.tensor(mat_dict['Ims2reg'])
+        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
         ct = torch.tensor(mat_dict['imsCTreg'])
-        ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+        ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=4))
+        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=15))
 
-        train_input.append(torch.stack((ute1, ute2), 0))
+        train_input.append(utes)
         train_masks.append(ct_mask)
         train_label.append(ct)
 
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... done')
 
-    train_input = torch.cat(train_input, -1)
-    train_masks = torch.cat(train_masks, -1)
-    train_label = torch.cat(train_label, -1)
+    train_input = torch.stack(train_input, 0)
+    train_masks = torch.stack(train_masks, 0)
+    train_label = torch.stack(train_label, 0)
 
-    nz_mask = train_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
-
-    train_input = train_input[:, :, :, nz_mask]
-    train_masks = train_masks[:, :, nz_mask]
-    train_label = train_label[:, :, nz_mask]
+    # nz_mask = train_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
+    #
+    # train_input = train_input[:, :, :, nz_mask]
+    # train_masks = train_masks[:, :, nz_mask]
+    # train_label = train_label[:, :, nz_mask]
 
     return train_input, train_masks, train_label
+
 
 def process_label_data(files):
 
@@ -65,43 +76,42 @@ def process_label_data(files):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
 
-        ute1 = torch.tensor(mat_dict['Ims1reg'])
-        ute2 = torch.tensor(mat_dict['Ims2reg'])
+        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
         ct = torch.tensor(mat_dict['imsCTreg'])
-        ct_mask = torch.tensor(mat_dict['CTbinaryMaskReg'])
+        ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=4))
+        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=15))
 
-        label_input.append(torch.stack((ute1, ute2), 0))
+        label_input.append(utes)
         label_masks.append(ct_mask)
         label_label.append(ct)
 
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... done')
 
-    label_input = torch.cat(label_input, -1)
-    label_masks = torch.cat(label_masks, -1)
-    label_label = torch.cat(label_label, -1)
+    label_input = torch.stack(label_input, 0)
+    label_masks = torch.stack(label_masks, 0)
+    label_label = torch.stack(label_label, 0)
 
-    nz_mask = label_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
-
-    label_input = label_input[:, :, :, nz_mask]
-    label_masks = label_masks[:, :, nz_mask]
-    label_label = label_label[:, :, nz_mask]
+    # nz_mask = label_masks.max(dim=0)[0].max(dim=0)[0].to(torch.bool)
+    #
+    # label_input = label_input[:, :, :, nz_mask]
+    # label_masks = label_masks[:, :, nz_mask]
+    # label_label = label_label[:, :, nz_mask]
 
     return label_input, label_masks, label_label
 
 
-def process_data():
-    data_path = '/hdscratch/ucair/CUTE/Data/RawData/'
-    out_path = './Data/PreProcessedData/Label002Data/'
+def process_data(opt):
+    data_path = opt.data_path
+    out_path = opt.out_path
 
     if not os.path.exists(out_path):
         os.makedirs(out_path)
 
     files = sorted(glob.glob(f'{data_path}/*.mat'))
 
-    train_input, train_masks, train_label = process_training_data([files[1], files[2]])
-    infer_input, infer_masks, infer_label = process_label_data([files[0]])
+    train_input, train_masks, train_label = process_training_data([files[0], files[1], files[2], files[3]])
+    infer_input, infer_masks, infer_label = process_label_data([files[4]])
 
     # print(f'Processing {files[-1].split("/")[-1].split("_")[0]} ... ')
     # mat_dict = loadmat(files[-1])
@@ -135,4 +145,4 @@ def process_data():
 
 
 if __name__ == '__main__':
-    process_data()
+    process_data(opt)

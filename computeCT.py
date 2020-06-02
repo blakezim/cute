@@ -14,7 +14,7 @@ import numpy as np
 # import torch.nn.functional as F
 
 # import matplotlib
-from models import unet_model
+from models import unet_model, vnet_model
 
 # from VNet.vNetModel import vnet_model
 # from collections import OrderedDict
@@ -29,6 +29,26 @@ from dataset import TrainDataset, EvalDataset
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler
+
+
+parser = argparse.ArgumentParser(description='PyTorch Patch Based Super Deep Interpolation Example')
+
+parser.add_argument('-d', '--data_dir', type=str, default='./Data/PreProcessedData/Label005Data/',
+                    help='Path to data directory')
+parser.add_argument('-o', '--out_dir', type=str, default='./Output/', help='Path to output')
+parser.add_argument('--trainBatchSize', type=int, default=8, help='training batch size')
+parser.add_argument('--inferBatchSize', type=int, default=8, help='cross validation batch size')
+parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for')
+parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
+parser.add_argument('--cuda', action='store_true', help='use cuda?')
+parser.add_argument('--seed', type=int, default=358, help='random seed to use. Default=358')
+parser.add_argument('--threads', type=int, default=4, help='number of threads for data loader to use')
+parser.add_argument('--cube_size', type=int, default=[128, 128, 128], help='3D cube size')
+parser.add_argument('--eval_size', type=int, default=[128, 128, 128], help='3D cube size')
+parser.add_argument('-s', '--samples', type=int, default=200, help='how many samples from each volume')
+
+opt = parser.parse_args()
+print(opt)
 
 
 def _get_branch(opt):
@@ -74,13 +94,17 @@ def _check_branch(opt, saved_dict, model):
     return model, device
 
 
-def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', epoch=0, vmin=None, vmax=None):
+def add_figure(tensor, writer, title=None, text=None, text_start=[160, 200], text_spacing=40,
+               label=None, cmap='jet', epoch=0, min_max=None):
 
     import matplotlib.pyplot as plt
 
     font = {'color': 'white', 'size': 20}
     plt.figure()
-    plt.imshow(tensor.squeeze().cpu(), cmap=cmap, vmin=vmin, vmax=vmax)
+    if min_max:
+        plt.imshow(tensor.squeeze().cpu(), cmap=cmap, vmin=min_max[0], vmax=min_max[1])
+    else:
+        plt.imshow(tensor.squeeze().cpu(), cmap=cmap)
     plt.colorbar()
     plt.axis('off')
     if title:
@@ -88,7 +112,7 @@ def add_figure(tensor, writer, title=None, text=None, label=None, cmap='jet', ep
     if text:
         if type(text) == list:
             for i, t in enumerate(text, 1):
-                plt.text(160, (i * 40) + 200, t, fontdict=font)
+                plt.text(text_start[0], (i * text_spacing) + text_start[1], t, fontdict=font)
 
     writer.add_figure(label, plt.gcf(), epoch)
     plt.close('all')
@@ -101,7 +125,7 @@ def load_infer_data(opt):
     infer_label = torch.load(f'{opt.dataDirectory}/infer_label.pt')
     infer_masks = torch.load(f'{opt.dataDirectory}/infer_masks.pt')
 
-    return infer_input[0].squeeze(), infer_input[1].squeeze(), infer_masks, infer_label
+    return infer_input[:, 0].squeeze(), infer_input[:, 1].squeeze(), infer_masks, infer_label
 
 
 def load_train_data(opt):
@@ -111,21 +135,26 @@ def load_train_data(opt):
     train_label = torch.load(f'{opt.dataDirectory}/train_label.pt')
     train_masks = torch.load(f'{opt.dataDirectory}/train_masks.pt')
 
-    return train_input[0].squeeze(), train_input[1].squeeze(), train_masks, train_label
+    return train_input[:, 0].squeeze(), train_input[:, 1].squeeze(), train_masks, train_label
 
 
 def get_loaders(opt):
 
     input1, input2, mask, label = load_train_data(opt)
+    samps = opt.samples
+    train_length = int(label.shape[0]) * samps
 
-    train_dataset = TrainDataset(input1, input2, mask, label, int(label.shape[-1]) * 2, opt.crop)
-    train_sampler = SubsetRandomSampler(range(0, int(label.shape[-1]) * 2))
+    train_dataset = TrainDataset(input1, input2, mask, label, train_length, opt.cube_size)
+    train_sampler = SubsetRandomSampler(range(0, train_length))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
     input1, input2, mask, label = load_infer_data(opt)
+    if len(input1.shape) == 3:
+        input1 = input1.unsqueeze(0)
+        input2 = input2.unsqueeze(0)
 
-    infer_dataset = EvalDataset(input1, input2, mask, label, int(label.shape[-1]))
-    infer_sampler = SequentialSampler(range(0, int(label.shape[-1])))
+    infer_dataset = EvalDataset(input1, input2, mask, label)
+    infer_sampler = SequentialSampler(range(0, len(infer_dataset)))
     infer_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
 
     return train_loader, infer_loader
@@ -145,6 +174,8 @@ def learn(opt):
 
     def train(epoch, scheduler):
         model.train()
+        n_samps = []
+        b_losses = []
         # crit = nn.MSELoss(reduction='none')
         crit = nn.L1Loss()
         e_loss = 0.0
@@ -152,84 +183,114 @@ def learn(opt):
         for iteration, batch in enumerate(training_data_loader, 1):
             inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
 
+            n_samps.append(mask.sum().item())
             optimizer.zero_grad()
             pred = model(inputs).squeeze()
 
-            # loss = (crit(pred.squeeze(), label) * mask).mean()
             loss = crit(pred[mask], label[mask])
             loss.backward()
 
-            e_loss += loss.item()
             b_loss = loss.item()
+            b_losses.append(loss.item())
             optimizer.step()
+
+            if iteration == len(training_data_loader) // 2:
+                with torch.no_grad():
+                    l1Loss = nn.L1Loss()
+                    im = len(inputs) // 2
+
+                    mask_slice = mask[im, :, :, 32]
+                    label_slice = label[im, :, :, 32] * mask_slice
+                    pred_slice = pred[im, :, :, 32] * mask_slice
+                    input1_slice = inputs[im, 0, :, :, 32] * mask_slice
+                    input2_slice = inputs[im, 1, :, :, 32] * mask_slice
+
+                    add_figure(input1_slice, writer, title='Input 1', label='Train/Input1', cmap='viridis', epoch=epoch)
+                    add_figure(input2_slice, writer, title='Input 2', label='Train/Input2', cmap='viridis', epoch=epoch)
+
+                    # Add the prediction
+                    pred_loss = l1Loss(pred_slice[mask_slice], label_slice[mask_slice])
+                    add_figure(pred_slice, writer, title='Predicted T1', label='Train/Pred CT', cmap='plasma',
+                               epoch=epoch,
+                               text=[f'Loss: {pred_loss.item():.4f}',
+                                     f'Mean: {pred_slice[mask_slice].mean():.2f}',
+                                     f'Min:  {pred_slice[mask_slice].min():.2f}',
+                                     f'Max:  {pred_slice[mask_slice].max():.2f}'
+                                     ], min_max=[0.0, 1.0], text_start=[5, 5], text_spacing=40)
+                    # Add the stir
+                    add_figure(label_slice, writer, title='STIR T1', label='Train/Real CT', cmap='plasma', epoch=epoch,
+                               text=[f'Mean: {label_slice[mask_slice].mean():.2f}',
+                                     f'Min:  {label_slice[mask_slice].min():.2f}',
+                                     f'Max:  {label_slice[mask_slice].max():.2f}'
+                                     ], min_max=[0.0, 1.0], text_start=[5, 5], text_spacing=40)
 
             for param_group in optimizer.param_groups:
                 clr = param_group['lr']
             writer.add_scalar('Batch/Learning Rate', clr, (iteration + (len(training_data_loader) * (epoch - 1))))
-            writer.add_scalar('Batch/Avg. MSE Loss', b_loss, (iteration + (len(training_data_loader) * (epoch - 1))))
+            writer.add_scalar('Batch/Avg. Loss', b_loss, (iteration + (len(training_data_loader) * (epoch - 1))))
             print("=> Done with {} / {}  Batch Loss: {:.6f}".format(iteration, len(training_data_loader), b_loss))
 
-        writer.add_scalar('Epoch/Avg. MSE Loss', e_loss / len(training_data_loader), epoch)
-        print("===> Epoch {} Complete: Avg. Loss: {:.6f}".format(epoch, e_loss / len(training_data_loader)))
+        e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
+        writer.add_scalar('Epoch/Avg. Loss', e_loss, epoch)
+        print(f"===> Avg. Loss: {e_loss:.6f}")
         scheduler.step(e_loss / len(training_data_loader))
 
     def infer(epoch):
-        model.eval()
         # crit = nn.MSELoss(reduction='none')
+        n_samps = []
+        b_losses = []
         crit = nn.L1Loss()
-        e_loss = 0.0
 
         print('===> Evaluating Model')
         with torch.no_grad():
+            model.eval()
             for iteration, batch in enumerate(testing_data_loader, 1):
                 inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
 
+                n_samps.append(mask.sum().item())
                 pred = model(inputs).squeeze()
-                # loss = (crit(pred.squeeze(), label) * mask).mean()
                 loss = crit(pred[mask], label[mask])
-                e_loss += loss.item()
                 b_loss = loss.item()
+                b_losses.append(loss.item())
 
-                if iteration == int(len(testing_data_loader) // 2):
-                    im = int(len(testing_data_loader) // 2) % opt.inferBatchSize
+                if iteration == len(testing_data_loader) // 2:
+                    im = len(inputs) // 2
+
+                    l1Loss = nn.L1Loss()
+                    mask_slice = mask[im, :, :, 64]
+                    label_slice = label[im, :, :, 64] * mask_slice
+                    pred_slice = pred[im, :, :, 64] * mask_slice
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
-                        input1 = inputs[im, 0].squeeze()
-                        input2 = inputs[im, 1].squeeze()
-                        add_figure(input1, writer, title='Input 1', label='Infer/Input1', cmap='viridis', epoch=epoch,
-                                   text=[f'Mean: {input1.mean():.2f}',
-                                         f'Min:  {input1.min():.2f}',
-                                         f'Max:  {input1.max():.2f}'],
-                                   )
-                        add_figure(input2, writer, title='Input 2', label='Infer/Input2', cmap='viridis', epoch=epoch,
-                                   text=[f'Mean: {input2.mean():.2f}',
-                                         f'Min:  {input2.min():.2f}',
-                                         f'Max:  {input2.max():.2f}'],
-                                   )
+                        input1_slice = inputs[im, 0, :, :, im] * mask_slice
+                        input2_slice = inputs[im, 1, :, :, im] * mask_slice
+                        add_figure(input1_slice, writer, title='Input 1', label='Infer/Input1', cmap='viridis',
+                                   epoch=epoch)
+                        add_figure(input2_slice, writer, title='Input 2', label='Infer/Input2', cmap='viridis',
+                                   epoch=epoch)
+                        add_figure(label_slice, writer, title='STIR T1', label='Infer/Real CT', cmap='plasma',
+                                   epoch=epoch,
+                                   text=[f'Mean: {label_slice[mask_slice].mean():.2f}',
+                                         f'Min:  {label_slice[mask_slice].min():.2f}',
+                                         f'Max:  {label_slice[mask_slice].max():.2f}'
+                                         ], min_max=[0.0, 1.0])
+
                     # Add the prediction
-                    pred_im = pred[im].squeeze()
-                    add_figure(pred_im, writer, title='Prediction', label='Infer/Pred', cmap='gray', epoch=epoch,
-                               text=[f'Mean: {pred_im.mean():.2f}',
-                                     f'Min:  {pred_im.min():.2f}',
-                                     f'Max:  {pred_im.max():.2f}'],
-                               vmin=0.0, vmax=1.0
-                               )
 
-                    # Add the CT - not going to change
-                    if epoch == 1:
-                        stir_im = label[im]
-
-                        add_figure(stir_im, writer, title='CT', label='Infer/CT', cmap='gray', epoch=epoch,
-                                   text=[f'Mean: {stir_im.mean():.2f}',
-                                         f'Min:  {stir_im.min():.2f}',
-                                         f'Max:  {stir_im.max():.2f}'],
-                                   vmin=0.0, vmax=1.0
-                                   )
+                    pred_loss = l1Loss(pred_slice[mask_slice], label_slice[mask_slice])
+                    add_figure(pred_slice, writer, title='Predicted T1', label='Infer/Pred T1', cmap='plasma',
+                               epoch=epoch,
+                               text=[f'Loss: {pred_loss.item():.4f}',
+                                     f'Mean: {pred_slice[mask_slice].mean():.2f}',
+                                     f'Min:  {pred_slice[mask_slice].min():.2f}',
+                                     f'Max:  {pred_slice[mask_slice].max():.2f}'
+                                     ], min_max=[0.0, 1.0])
                 print(f"=> Done with {iteration} / {len(testing_data_loader)}  Batch Loss: {b_loss:.6f}")
 
-            writer.add_scalar('Infer/Avg. MSE Loss', e_loss / len(testing_data_loader), epoch)
-            print(f"===> Avg. MSE Loss: {e_loss / len(testing_data_loader):.6f}")
+            e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
+            writer.add_scalar('Infer/Avg. Loss', e_loss, epoch)
+            print(f"===> Avg. Loss: {e_loss:.6f}")
 
     # Add the git information to the opt
     _get_branch(opt)
@@ -252,11 +313,11 @@ def learn(opt):
     training_data_loader, testing_data_loader = get_loaders(opt)
     print(' done')
 
-    model = unet_model.UNet(2, 1)
+    model = vnet_model.VNet(2, 1)
     model = model.to(device)
     model = nn.DataParallel(model)
 
-    optimizer = optim.SGD(model.parameters(), lr=opt.lr, weight_decay=1e-6, momentum=0.9, nesterov=True)
+    optimizer = optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-6)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, verbose=True, factor=0.5,
                                                      threshold=5e-3, cooldown=75, min_lr=1e-6)
 
@@ -285,19 +346,28 @@ def eval(opt):
     import matplotlib.pyplot as plt
     plt.ion()
 
-    files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
+    # files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
 
     print('===> Loading Data ... ', end='')
-    mat_dict = loadmat(files[-1])
+    # mat_dict = loadmat(files[0])  # 002
+    # mat_dict = loadmat(files[1])  # 003
+    # mat_dict = loadmat(files[2])  # 005
+    opt.dataDirectory = f'{opt.dataDirectory}/Label{opt.skull}Data'
 
-    ute1 = torch.tensor(mat_dict['Ims1reg'])
-    ute2 = torch.tensor(mat_dict['Ims2reg'])
-    ct = torch.tensor(mat_dict['imsCTreg'])
-    ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+    input1, input2, mask, label = load_infer_data(opt)
 
-    infer_dataset = EvalDataset(ute1, ute2, ct_mask, ct, int(ct.shape[-1]))
-    infer_sampler = SequentialSampler(range(0, int(ct.shape[-1])))
-    eval_loader = DataLoader(infer_dataset, opt.evalBatchSize, sampler=infer_sampler, num_workers=opt.threads)
+    infer_dataset = EvalDataset(input1, input2, mask, label, int(label.shape[-1]))
+    infer_sampler = SequentialSampler(range(0, int(label.shape[-1])))
+    eval_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
+
+    # ute1 = torch.tensor(mat_dict['Ims1reg'])
+    # ute2 = torch.tensor(mat_dict['Ims2reg'])
+    # ct = torch.tensor(mat_dict['imsCTreg'])
+    # ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
+    #
+    # infer_dataset = EvalDataset(ute1, ute2, ct_mask, ct, int(ct.shape[-1]))
+    # infer_sampler = SequentialSampler(range(0, int(ct.shape[-1])))
+    # eval_loader = DataLoader(infer_dataset, opt.evalBatchSize, sampler=infer_sampler, num_workers=opt.threads)
     print('done')
 
     print('===> Loading Model ... ', end='')
@@ -321,6 +391,9 @@ def eval(opt):
     crit = nn.MSELoss()
     e_loss = 0.0
     preds = []
+    input_vols = []
+    label_vol = []
+    mask_vol = []
 
     print('===> Evaluating Model')
     with torch.no_grad():
@@ -329,6 +402,9 @@ def eval(opt):
 
             pred = model(inputs).squeeze()
             preds.append(pred.clone())
+            input_vols.append(inputs.clone())
+            label_vol.append(label.clone())
+            mask_vol.append(mask.clone())
 
             loss = crit(pred[mask], label[mask])
             e_loss += loss.item()
@@ -339,12 +415,45 @@ def eval(opt):
         print(f"===> Avg. MSE Loss: {e_loss / len(eval_loader):.6f}")
 
     pred_vol = torch.cat(preds, dim=0)
+    input_vols = torch.cat(input_vols, dim=0)
+    label_vol = torch.cat(label_vol, dim=0)
+    mask_vol = torch.cat(mask_vol, dim=0)
+    pred_vol = pred_vol * mask_vol
+    label_vol = label_vol * mask_vol
     pred_vol = (pred_vol * 4000.0) - 1000.0
     pred_vol[pred_vol < -1000.0] = -1000
     pred_vol[pred_vol > 3000.0] = 3000.0
     pred_vol = pred_vol.permute(1, 2, 0)
 
-    s = 300
+    label_vol = (label_vol * 4000.0) - 1000.0
+    label_vol[label_vol < -1000.0] = -1000
+    label_vol[label_vol > 3000.0] = 3000.0
+    label_vol = label_vol.permute(1, 2, 0)
+
+    ute1 = input_vols[:, 0, :, :].permute(1, 2, 0)
+    ute2 = input_vols[:, 1, :, :].permute(1, 2, 0)
+
+    downsample = True
+    if downsample:
+        raw_file = sorted(glob.glob(f'{opt.rawDir}skull{opt.skull}*.mat'))[0]
+        raw_dict = loadmat(raw_file)
+        zd = raw_dict['imsCT'].shape[-1]
+        import CAMP.Core as core
+        pred_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=pred_vol.unsqueeze(0))
+        pred_grid.set_size((pred_grid.shape()[1], pred_grid.shape()[2], zd))
+        label_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=label_vol.unsqueeze(0))
+        label_grid.set_size((label_grid.shape()[1], label_grid.shape()[2], zd))
+        ute1_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute1.unsqueeze(0))
+        ute1_grid.set_size((ute1_grid.shape()[1], ute1_grid.shape()[2], zd))
+        ute2_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute2.unsqueeze(0))
+        ute2_grid.set_size((ute2_grid.shape()[1], ute2_grid.shape()[2], zd))
+
+        pred_vol = pred_grid.data.squeeze().cpu()
+        label_vol = label_grid.data.squeeze().cpu()
+        ute1 = ute1_grid.data.squeeze().cpu()
+        ute2 = ute2_grid.data.squeeze().cpu()
+
+    s = 80
     save_fig = True
     fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
 
@@ -353,7 +462,7 @@ def eval(opt):
 
     in1_im = ute1[:, :, s].squeeze().cpu()
     in2_im = ute2[:, :, s].squeeze().cpu()
-    ct_im = ct[:, :, s].squeeze().cpu()
+    ct_im = label_vol[:, :, s].squeeze().cpu()
     pred_im = pred_vol[:, :, s].squeeze().cpu()
 
     plt.figure()
@@ -400,34 +509,42 @@ def eval(opt):
     # Generate the dictionary to save
     out_dict = {
         'pred_CT': pred_vol.cpu().numpy(),
+        'real_CT': label_vol.cpu().numpy(),
+        'UTE1': ute1.cpu().numpy(),
+        'UTE2': ute2.cpu().numpy()
     }
 
-    savemat(f'{fig_dir}/NN_Output.mat', out_dict)
+    savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
 
 
 if __name__ == '__main__':
-    trainOpt = {'trainBatchSize': 15,
-                'inferBatchSize': 15,
-                'dataDirectory': './Data/PreProcessedData/Label005Data/',
-                'outDirectory': './Output/',
-                'nEpochs': 1000,
-                'lr': 0.0001,
-                'cuda': True,
-                'threads': 6,
+
+    trainOpt = {'trainBatchSize': opt.trainBatchSize,
+                'inferBatchSize': opt.inferBatchSize,
+                'dataDirectory': opt.data_dir,
+                'outDirectory': opt.out_dir,
+                'nEpochs': opt.nEpochs,
+                'lr': opt.lr,
+                'cuda': opt.cuda,
+                'threads': opt.threads,
                 'resume': False,
                 'scheduler': True,
                 'ckpt': None,
-                'seed': 223,
-                'crop': None
+                'seed': opt.seed,
+                'cube_size': opt.cube_size,
+                'eval_size': opt.eval_size,
+                'samples': opt.samples
                 }
 
-    evalOpt = {'evalBatchSize': 16,
-               'dataDirectory': './Data/RawData/',
-               'model_dir': '/home/sci/blakez/ucair/CUTE/Output/saves/2020-04-11-085151/',
+    evalOpt = {'inferBatchSize': 16,
+               'skull': '002',
+               'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-04-16-102350/',
+               'rawDir': '/hdscratch/ucair/CUTE/Data/RawData/',
                'outDirectory': './Output/Predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': 'epoch_00050_model.pth'
+               'ckpt': 'epoch_01000_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)
