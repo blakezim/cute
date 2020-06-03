@@ -178,7 +178,6 @@ def learn(opt):
         b_losses = []
         # crit = nn.MSELoss(reduction='none')
         crit = nn.L1Loss()
-        e_loss = 0.0
 
         for iteration, batch in enumerate(training_data_loader, 1):
             inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
@@ -198,12 +197,13 @@ def learn(opt):
                 with torch.no_grad():
                     l1Loss = nn.L1Loss()
                     im = len(inputs) // 2
+                    sl = torch.max(mask[im].sum(0).sum(0), dim=0)[-1].item()
 
-                    mask_slice = mask[im, :, :, 32]
-                    label_slice = label[im, :, :, 32] * mask_slice
-                    pred_slice = pred[im, :, :, 32] * mask_slice
-                    input1_slice = inputs[im, 0, :, :, 32] * mask_slice
-                    input2_slice = inputs[im, 1, :, :, 32] * mask_slice
+                    mask_slice = mask[im, :, :, sl]
+                    label_slice = label[im, :, :, sl] * mask_slice
+                    pred_slice = pred[im, :, :, sl] * mask_slice
+                    input1_slice = inputs[im, 0, :, :, sl] * mask_slice
+                    input2_slice = inputs[im, 1, :, :, sl] * mask_slice
 
                     add_figure(input1_slice, writer, title='Input 1', label='Train/Input1', cmap='viridis', epoch=epoch)
                     add_figure(input2_slice, writer, title='Input 2', label='Train/Input2', cmap='viridis', epoch=epoch)
@@ -227,11 +227,11 @@ def learn(opt):
             for param_group in optimizer.param_groups:
                 clr = param_group['lr']
             writer.add_scalar('Batch/Learning Rate', clr, (iteration + (len(training_data_loader) * (epoch - 1))))
-            writer.add_scalar('Batch/Avg. Loss', b_loss, (iteration + (len(training_data_loader) * (epoch - 1))))
+            writer.add_scalar('Batch/Avg. MSE Loss', b_loss, (iteration + (len(training_data_loader) * (epoch - 1))))
             print("=> Done with {} / {}  Batch Loss: {:.6f}".format(iteration, len(training_data_loader), b_loss))
 
         e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
-        writer.add_scalar('Epoch/Avg. Loss', e_loss, epoch)
+        writer.add_scalar('Epoch/Avg. MSE Loss', e_loss, epoch)
         print(f"===> Avg. Loss: {e_loss:.6f}")
         scheduler.step(e_loss / len(training_data_loader))
 
@@ -254,17 +254,18 @@ def learn(opt):
                 b_losses.append(loss.item())
 
                 if iteration == len(testing_data_loader) // 2:
-                    im = len(inputs) // 2
+                    im = len(inputs) // 4
+                    sl = torch.max(mask[im].sum(0).sum(0), dim=0)[-1].item()
 
                     l1Loss = nn.L1Loss()
-                    mask_slice = mask[im, :, :, 64]
-                    label_slice = label[im, :, :, 64] * mask_slice
-                    pred_slice = pred[im, :, :, 64] * mask_slice
+                    mask_slice = mask[im, :, :, sl]
+                    label_slice = label[im, :, :, sl] * mask_slice
+                    pred_slice = pred[im, :, :, sl] * mask_slice
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
-                        input1_slice = inputs[im, 0, :, :, im] * mask_slice
-                        input2_slice = inputs[im, 1, :, :, im] * mask_slice
+                        input1_slice = inputs[im, 0, :, :, sl] * mask_slice
+                        input2_slice = inputs[im, 1, :, :, sl] * mask_slice
                         add_figure(input1_slice, writer, title='Input 1', label='Infer/Input1', cmap='viridis',
                                    epoch=epoch)
                         add_figure(input2_slice, writer, title='Input 2', label='Infer/Input2', cmap='viridis',
@@ -289,7 +290,7 @@ def learn(opt):
                 print(f"=> Done with {iteration} / {len(testing_data_loader)}  Batch Loss: {b_loss:.6f}")
 
             e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
-            writer.add_scalar('Infer/Avg. Loss', e_loss, epoch)
+            writer.add_scalar('Infer/Avg. MSE Loss', e_loss, epoch)
             print(f"===> Avg. Loss: {e_loss:.6f}")
 
     # Add the git information to the opt
