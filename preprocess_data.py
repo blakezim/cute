@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser(description='Multi-Flip Ange T1 Prediction Data
 
 parser.add_argument('-d', '--data_path', type=str, default='/hdscratch/ucair/CUTE/Data/RawData2/',
                     help='Raw Data Path')
-parser.add_argument('-o', '--out_path', type=str, default='./Data/PreProcessedData/Label005Data/',
+parser.add_argument('-o', '--out_path', type=str, default='./Data/PreProcessedData/Label003Data_HR/',
                     help='Path to save data')
 opt = parser.parse_args()
 
@@ -40,12 +40,18 @@ def process_training_data(files):
     for i, skull in enumerate(files):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
+        skull_num = skull.split('/')[-1].split('_')[0]
 
-        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
+        if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
+            print('Using High Res')
+            ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
+            utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
+        else:
+            utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
         ct = torch.tensor(mat_dict['imsCTreg'])
         ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=15))
+        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
 
         train_input.append(utes)
         train_masks.append(ct_mask)
@@ -75,12 +81,17 @@ def process_label_data(files):
     for i, skull in enumerate(files):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
-
-        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
+        skull_num = skull.split('/')[-1].split('_')[0]
+        if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
+            print('Using High Res')
+            ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
+            utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
+        else:
+            utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
         ct = torch.tensor(mat_dict['imsCTreg'])
         ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=15))
+        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
 
         label_input.append(utes)
         label_masks.append(ct_mask)
@@ -109,9 +120,10 @@ def process_data(opt):
         os.makedirs(out_path)
 
     files = sorted(glob.glob(f'{data_path}/*.mat'))
+    files = [x for x in files if 'workspace' in x]
 
-    train_input, train_masks, train_label = process_training_data([files[0], files[1], files[2], files[3]])
-    infer_input, infer_masks, infer_label = process_label_data([files[4]])
+    train_input, train_masks, train_label = process_training_data([files[0], files[1], files[3], files[4]])
+    infer_input, infer_masks, infer_label = process_label_data([files[2]])
 
     # print(f'Processing {files[-1].split("/")[-1].split("_")[0]} ... ')
     # mat_dict = loadmat(files[-1])

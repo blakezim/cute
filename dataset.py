@@ -6,10 +6,10 @@ import torchvision.transforms.functional as TF
 from PIL.Image import BILINEAR
 
 
-# import matplotlib
-# matplotlib.use('qt5agg')
-# import matplotlib.pyplot as plt
-# plt.ion()
+import matplotlib
+matplotlib.use('qt5agg')
+import matplotlib.pyplot as plt
+plt.ion()
 
 
 class TrainDataset(data.Dataset):
@@ -83,8 +83,60 @@ class EvalDataset(data.Dataset):
 
     @staticmethod
     def block_vol(vol):
+        import matplotlib
+        matplotlib.use('qt5agg')
+        import matplotlib.pyplot as plt
+        plt.ion()
         vol = vol.unfold(2, 128, 128).unfold(1, 128, 128).unfold(0, 128, 128).contiguous()
         vol = vol.view(-1, 128, 128, 128).contiguous()
+
+        return vol
+
+    def __getitem__(self, item):
+        in1 = self.in1[item].squeeze()
+        in2 = self.in2[item].squeeze()
+        label = self.label[item].squeeze()
+        mask = self.mask[item].squeeze()
+
+        label = (label + 1000.0) / 4000.0
+        mask = mask >= 0.5
+
+        input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
+
+        return input.float(), mask.bool(), label.float()
+
+    def __len__(self):
+        return self.length
+
+
+class PredictDataset(data.Dataset):
+    def __init__(self, input1, input2, mask, label):
+        super(PredictDataset, self).__init__()
+
+        # self.in1 = input1.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
+        # self.in2 = input2.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
+        # self.label = label.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
+        # self.mask = mask.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
+
+        # test = F.pad(input1, (23, 23, 0, 0, 0, 0))
+        pad = 128 - (torch.tensor(input1.squeeze().shape) % 128)
+        pad[pad == 128] = 0
+        pad_array = [0] * len(pad) * 2
+        pad_array[-2] = pad[-1].item()
+        pad_array = pad_array[::-1]
+
+        self.in1 = self.block_vol(F.pad(input1.squeeze(), pad_array))
+        self.in2 = self.block_vol(F.pad(input2.squeeze(), pad_array))
+        self.label = self.block_vol(F.pad(label.squeeze(), pad_array))
+        self.mask = self.block_vol(F.pad(mask.squeeze(), pad_array))
+        self.length = len(self.in1)
+
+    @staticmethod
+    def block_vol(vol):
+        # vol = F.pad(vol, [8, 8, 8, 8, 8, 8])
+        vol = vol.unfold(2, 128, 64).unfold(1, 128, 64).unfold(0, 128, 64).contiguous()
+        vol = vol.view(-1, 128, 128, 128).contiguous()
+
 
         return vol
 

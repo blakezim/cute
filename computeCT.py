@@ -24,12 +24,11 @@ from models import unet_model, vnet_model
 from scipy.io import loadmat, savemat
 from types import SimpleNamespace
 
-from dataset import TrainDataset, EvalDataset
+from dataset import TrainDataset, EvalDataset, PredictDataset
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler
-
 
 parser = argparse.ArgumentParser(description='PyTorch Patch Based Super Deep Interpolation Example')
 
@@ -64,7 +63,7 @@ def _get_branch(opt):
     opt.git_hash = hash
 
 
-def _check_branch(opt, saved_dict, model):
+def _check_branch(opt, saved_dict, model=None):
     """ When performing eval, check th git branch and commit that was used to generate the .pt file"""
 
     # Check the current branch and hash
@@ -78,9 +77,17 @@ def _check_branch(opt, saved_dict, model):
             params = torch.load(f'{opt.model_dir}{opt.ckpt}')
             model.load_state_dict(params['state_dict'])
         else:
+
+            device = torch.device('cuda')
+            model_gpu = model.to(device=device)
+            model_gpu = nn.DataParallel(model_gpu)
+            params = torch.load(f'{opt.model_dir}{opt.ckpt}')
+            model_gpu.load_state_dict(params['state_dict'])
+
             device = torch.device('cpu')
-            params = torch.load(f'{opt.model_dir}{opt.ckpt}', map_location='cpu')
-            model.load_state_dict(params['state_dict'])
+            model = vnet_model.VNet(2, 1)
+            # params = torch.load(f'{opt.model_dir}{opt.ckpt}', map_location=device)
+            model.load_state_dict(model_gpu.module.state_dict())
     except:
         raise Exception(f'The checkpoint {opt.ckpt} could not be loaded into the given model.')
 
@@ -96,7 +103,6 @@ def _check_branch(opt, saved_dict, model):
 
 def add_figure(tensor, writer, title=None, text=None, text_start=[160, 200], text_spacing=40,
                label=None, cmap='jet', epoch=0, min_max=None):
-
     import matplotlib.pyplot as plt
 
     font = {'color': 'white', 'size': 20}
@@ -119,7 +125,6 @@ def add_figure(tensor, writer, title=None, text=None, text_start=[160, 200], tex
 
 
 def load_infer_data(opt):
-
     # load the training data
     infer_input = torch.load(f'{opt.dataDirectory}/infer_input.pt')
     infer_label = torch.load(f'{opt.dataDirectory}/infer_label.pt')
@@ -129,7 +134,6 @@ def load_infer_data(opt):
 
 
 def load_train_data(opt):
-
     # load the inference data
     train_input = torch.load(f'{opt.dataDirectory}/train_input.pt')
     train_label = torch.load(f'{opt.dataDirectory}/train_label.pt')
@@ -139,7 +143,6 @@ def load_train_data(opt):
 
 
 def get_loaders(opt):
-
     input1, input2, mask, label = load_train_data(opt)
     samps = opt.samples
     train_length = int(label.shape[0]) * samps
@@ -161,7 +164,6 @@ def get_loaders(opt):
 
 
 def learn(opt):
-
     import matplotlib
     matplotlib.use('agg')
     import matplotlib.pyplot as plt
@@ -341,11 +343,11 @@ def learn(opt):
 
 
 def eval(opt):
-
     import matplotlib
     matplotlib.use('qt5agg')
     import matplotlib.pyplot as plt
     plt.ion()
+    import torch.nn.functional as F
 
     # files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
 
@@ -353,13 +355,20 @@ def eval(opt):
     # mat_dict = loadmat(files[0])  # 002
     # mat_dict = loadmat(files[1])  # 003
     # mat_dict = loadmat(files[2])  # 005
-    opt.dataDirectory = f'{opt.dataDirectory}/Label{opt.skull}Data'
+    opt.dataDirectory = f'{opt.dataDirectory}/Label{opt.skull}Data_HR/'
 
     input1, input2, mask, label = load_infer_data(opt)
+    if len(input1.shape) == 3:
+        input1 = input1.unsqueeze(0)
+        input2 = input2.unsqueeze(0)
 
-    infer_dataset = EvalDataset(input1, input2, mask, label, int(label.shape[-1]))
-    infer_sampler = SequentialSampler(range(0, int(label.shape[-1])))
-    eval_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
+    # inputs = torch.cat((input1, input2), dim=0)
+    # inputs = F.pad(inputs, (55, 55, 0, 0, 0, 0)).unsqueeze(0).contiguous()
+    # inputs = inputs[:, :, ::2, ::2, ::2].contiguous()
+
+    dataset = PredictDataset(input1, input2, mask, label)
+    sampler = SequentialSampler(range(0, len(dataset)))
+    loader = DataLoader(dataset, opt.inferBatchSize, sampler=sampler, num_workers=opt.threads)
 
     # ute1 = torch.tensor(mat_dict['Ims1reg'])
     # ute2 = torch.tensor(mat_dict['Ims2reg'])
@@ -383,42 +392,88 @@ def eval(opt):
         model_file = models[-1].split('/')[-1]
         opt.ckpt = f'{lasttime}/{model_file}'
 
-    model = unet_model.UNet(2, 1)
+    model = vnet_model.VNet(2, 1)
     saved_dict = SimpleNamespace(**torch.load(f'{opt.model_dir}{opt.ckpt}'))
     model, device = _check_branch(opt, saved_dict, model)
     print('done')
 
-    model.eval()
-    crit = nn.MSELoss()
+    crit = nn.L1Loss()
     e_loss = 0.0
     preds = []
     input_vols = []
     label_vol = []
     mask_vol = []
+    b_losses = []
+    n_samps = []
 
     print('===> Evaluating Model')
     with torch.no_grad():
-        for iteration, batch in enumerate(eval_loader, 1):
+        model.eval()
+        for iteration, batch in enumerate(loader, 1):
             inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
 
+            n_samps.append(mask.sum().item())
             pred = model(inputs).squeeze()
-            preds.append(pred.clone())
-            input_vols.append(inputs.clone())
-            label_vol.append(label.clone())
-            mask_vol.append(mask.clone())
-
             loss = crit(pred[mask], label[mask])
-            e_loss += loss.item()
             b_loss = loss.item()
+            b_losses.append(loss.item())
 
-            print(f"=> Done with {iteration} / {len(eval_loader)}  Batch Loss: {b_loss:.6f}")
+            preds.append(pred.clone().cpu())
+            input_vols.append(inputs.clone().cpu())
+            label_vol.append(label.clone().cpu())
+            mask_vol.append(mask.clone().cpu())
 
-        print(f"===> Avg. MSE Loss: {e_loss / len(eval_loader):.6f}")
+            print(f"=> Done with {iteration} / {len(loader)}  Batch Loss: {b_loss:.6f}")
+
+        e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
+        print(f"===> Avg. Loss: {e_loss:.6f}")
+
+        # torch.backends.cudnn.enabled = False
+
+        # model = torch.jit.trace(model, inputs[:, :, 0:128, 0:128, 0:128].clone())
+
+        #
+        # inputs = inputs.to(device=device)
+        # mask = mask.to(device=device)
+        # label = label.to(device=device)
+
+        # for param in model.parameters():
+        #     param.requires_grad = False
+
+        # pred = model(inputs).squeeze()
+        # preds.append(pred.clone())
+        # input_vols.append(inputs.clone())
+        # label_vol.append(label.clone())
+        # mask_vol.append(mask.clone())
+        #
+        # loss = crit(pred[mask], label[mask])
+        # e_loss += loss.item()
+        # b_loss = loss.item()
+        #
+        # print(f"===> Avg. MSE Loss: {e_loss / len(infer_loader):.6f}")
 
     pred_vol = torch.cat(preds, dim=0)
+    mask_vol = torch.cat(mask_vol, dim=0)
+    label_vol = torch.cat(label_vol, dim=0)
+    pred_vol = pred_vol.view(7, 7, 7, 128, 128, 128)
+    mask_vol = mask_vol.view(7, 7, 7, 128, 128, 128)
+    label_vol = label_vol.view(7, 7, 7, 128, 128, 128)
+
+    reshape_list = []
+    _ = [reshape_list.extend([x, y]) for x, y in zip(list(range(0, 3)), list(range(3, 6))[::-1])]
+    vol1 = pred_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
+    vol2 = pred_vol[1::2, 1::2, 1::2, :, :, :].permute(reshape_list).reshape(384, 384, 384)
+
+    mask_vol = mask_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
+    label_vol = label_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
+
+
+    # out_vol = torch.zeros(512, 512, 512)
+    # out_vol[:, :, 0:384] = vol1.clone()
+
     input_vols = torch.cat(input_vols, dim=0)
     label_vol = torch.cat(label_vol, dim=0)
-    mask_vol = torch.cat(mask_vol, dim=0)
+
     pred_vol = pred_vol * mask_vol
     label_vol = label_vol * mask_vol
     pred_vol = (pred_vol * 4000.0) - 1000.0
@@ -519,7 +574,6 @@ def eval(opt):
 
 
 if __name__ == '__main__':
-
     trainOpt = {'trainBatchSize': opt.trainBatchSize,
                 'inferBatchSize': opt.inferBatchSize,
                 'dataDirectory': opt.data_dir,
@@ -538,19 +592,19 @@ if __name__ == '__main__':
                 }
 
     evalOpt = {'inferBatchSize': 16,
-               'skull': '002',
+               'skull': '005',
                'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
-               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-04-16-102350/',
-               'rawDir': '/hdscratch/ucair/CUTE/Data/RawData/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-06-03-160958/',
+               'rawDir': '/hdscratch/ucair/CUTE/Data/RawData2/',
                'outDirectory': './Output/Predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': 'epoch_01000_model.pth'
+               'ckpt': 'epoch_00500_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    learn(trainOpt)
-    # eval(evalOpt)
+    # learn(trainOpt)
+    eval(evalOpt)
     print('All Done')

@@ -60,6 +60,7 @@ class InputTransition(nn.Module):
         out = self.bn1(self.conv1(x))
         # split input in to 16 channels
         x16 = torch.cat((x, x, x, x, x, x, x, x), 1)
+        del x
         out = self.relu1(self.conv2(torch.add(out, x16)))
         return out
 
