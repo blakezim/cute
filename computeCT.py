@@ -196,7 +196,7 @@ def learn(opt):
             b_losses.append(loss.item())
             optimizer.step()
 
-            if iteration == len(training_data_loader) // 2:
+            if iteration == len(training_data_loader) // 2 and epoch % 10 == 0:
                 with torch.no_grad():
                     l1Loss = nn.L1Loss()
                     im = len(inputs) // 2
@@ -255,7 +255,7 @@ def learn(opt):
                 b_loss = loss.item()
                 b_losses.append(loss.item())
 
-                if iteration == len(testing_data_loader) // 2:
+                if iteration == len(testing_data_loader) // 2 and epoch % 10 == 0:
                     im = len(inputs) // 4
 
                     l1Loss = nn.L1Loss()
