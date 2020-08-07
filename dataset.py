@@ -6,152 +6,153 @@ import torchvision.transforms.functional as TF
 from PIL.Image import BILINEAR
 
 
-import matplotlib
-matplotlib.use('qt5agg')
-import matplotlib.pyplot as plt
-plt.ion()
+# import matplotlib
+# matplotlib.use('qt5agg')
+# import matplotlib.pyplot as plt
+# plt.ion()
 
 
 class TrainDataset(data.Dataset):
 
-    def __init__(self, input1, input2, mask, label, length, cube_size):
+    def __init__(self, utes, mask, ct, length, opt):
         super(TrainDataset, self).__init__()
 
-        self.in1 = input1
-        self.in2 = input2
-        self.label = label
+        self.utes = utes
+        self.label = ct
         self.mask = mask
         self.length = length
-        self.cube = cube_size
-        self.num_vols = input1.shape[0]
+        self.num_vols = utes.shape[0]
+
+        self.batch_size = opt.trainBatchSize
+
+        self.dim = 2
+        self.counter = 0
+
+    def spatial_transform(self, ute, mask, ct):
+
+        vflip = torch.rand(1).item() > 0.5
+        hflip = torch.rand(1).item() > 0.5
+        deg = torch.LongTensor(1).random_(-10, 10).item()
+        scale = torch.FloatTensor(1).uniform_(0.8, 1.2)
+        translate = tuple(torch.FloatTensor(2).uniform_(0.0, 0.10).tolist())
+        shear = torch.FloatTensor(1).uniform_(0.0, 3.0).item()
+
+        image_list = [ute, mask, ct]
+        for i, p in enumerate(image_list):
+
+            if len(p.shape) > 2:
+                for s in range(p.shape[0]):
+                    sl = p[s]
+                    dtype = sl.dtype
+
+                    sl_min = sl.min()
+                    sl_max = sl.max()
+
+                    sl = (sl - sl_min) / ((sl_max - sl_min) + 0.001)
+
+                    sl = TF.to_pil_image(sl.float())
+                    if vflip:
+                        sl = TF.vflip(sl)
+                    if hflip:
+                        sl = TF.hflip(sl)
+
+                    sl = TF.affine(sl, deg, scale=scale, translate=translate, shear=shear, resample=BILINEAR)
+                    sl = TF.to_tensor(sl).squeeze()
+                    if dtype == torch.int64:
+                        sl = sl.round()
+                    sl = sl.to(dtype=dtype)
+
+                    sl = (sl * ((sl_max - sl_min) + 0.001)) + sl_min
+                    p[s] = sl
+                noise = torch.FloatTensor(p.size()).normal_(0, 0.05)
+                p = (p + noise).clone()
+
+            else:
+                p_min = p.min()
+                p_max = p.max()
+
+                p = (p - p_min) / ((p_max - p_min) + 0.001)
+
+                p = TF.to_pil_image(p.float())
+                if vflip:
+                    p = TF.vflip(p)
+                if hflip:
+                    p = TF.hflip(p)
+
+                p = TF.affine(p, deg, scale=scale, translate=translate, shear=shear, resample=BILINEAR)
+                p = TF.to_tensor(p).squeeze()
+                if dtype == torch.int64:
+                    p = p.round()
+                p = p.to(dtype=dtype)
+
+                p = (p * ((p_max - p_min) + 0.001)) + p_min
+
+            image_list[i] = p.clone()
+        ute, mask, ct = image_list
+
+        return ute, mask, ct
 
     def __getitem__(self, item):
+        # import matplotlib
+        # matplotlib.use('qt5agg')
+        # import matplotlib.pyplot as plt
+        # plt.ion()
+
+        if self.counter == self.batch_size:
+            self.dim = torch.LongTensor(1).random_(3).item()
+            self.counter = 0
+
+        # Get which volume to get it out of
         v = item % self.num_vols
+        ims_shape = self.utes[v].shape
 
-        in1 = self.in1[v, :, :, :].squeeze()
-        in2 = self.in2[v, :, :, :].squeeze()
-        label = self.label[v, :, :, :].squeeze()
-        mask = self.mask[v, :, :, :].squeeze().float()
+        rand_slice = torch.LongTensor(1).random_(ims_shape[self.dim + 1])
 
-        sub_mask = torch.zeros(self.cube)
+        slicer_obj = [slice(ims_shape[0]), slice(ims_shape[1]), slice(ims_shape[2]), slice(ims_shape[3])]
+        slicer_obj[self.dim + 1] = slice(rand_slice.item(), rand_slice.item() + 1)
 
-        label = (label + 1000.0) / 4000.0
+        utes = self.utes[v][slicer_obj].squeeze(self.dim + 1)
+        ct = self.label[v][slicer_obj[1:]].squeeze()
+        mask = self.mask[v][slicer_obj[1:]].squeeze()
+
+        # Spatially trasform the source and target
+        utes, mask, ct = self.spatial_transform(utes, mask, ct)
+
+        ct = (ct + 1000) / 4000
+
         mask = mask >= 0.5
 
-        while sub_mask.sum() == 0.0:
-            start_x = (torch.rand(1) * (in1.shape[0] - self.cube[0])).int()
-            start_y = (torch.rand(1) * (in1.shape[1] - self.cube[1])).int()
-            start_z = (torch.rand(1) * (in1.shape[2] - self.cube[2])).int()
+        self.counter += 1
 
-            sub_mask = mask[start_x:start_x + self.cube[0],
-                       start_y:start_y + self.cube[1],
-                       start_z:start_z + self.cube[2]]
-
-        sub_in1 = in1[start_x:start_x + self.cube[0],
-                  start_y:start_y + self.cube[1],
-                  start_z:start_z + self.cube[2]]
-        sub_in2 = in2[start_x:start_x + self.cube[0],
-                  start_y:start_y + self.cube[1],
-                  start_z:start_z + self.cube[2]]
-
-        sub_label = label[start_x:start_x + self.cube[0],
-                    start_y:start_y + self.cube[1],
-                    start_z:start_z + self.cube[2]]
-
-        input = torch.stack((sub_in1.squeeze(), sub_in2.squeeze()), dim=0)
-
-        return input.float(), sub_mask.bool(), sub_label.float()
+        return utes.clone(), mask.bool(), ct.float()
 
     def __len__(self):
         return self.length
 
 
 class EvalDataset(data.Dataset):
-    def __init__(self, input1, input2, mask, label):
+    def __init__(self, utes, mask, ct, length):
         super(EvalDataset, self).__init__()
 
-        self.in1 = input1.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        self.in2 = input2.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        self.label = label.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        self.mask = mask.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
+        self.utes = utes
+        self.label = ct
+        self.mask = mask
 
-        self.in1 = self.block_vol(self.in1)
-        self.in2 = self.block_vol(self.in2)
-        self.label = self.block_vol(self.label)
-        self.mask = self.block_vol(self.mask)
-        self.length = len(self.in1)
+        self.num_vols = utes.shape[0]
 
-    @staticmethod
-    def block_vol(vol):
-        import matplotlib
-        matplotlib.use('qt5agg')
-        import matplotlib.pyplot as plt
-        plt.ion()
-        vol = vol.unfold(2, 128, 128).unfold(1, 128, 128).unfold(0, 128, 128).contiguous()
-        vol = vol.view(-1, 128, 128, 128).contiguous()
-
-        return vol
+        self.length = length
 
     def __getitem__(self, item):
-        in1 = self.in1[item].squeeze()
-        in2 = self.in2[item].squeeze()
-        label = self.label[item].squeeze()
-        mask = self.mask[item].squeeze()
 
-        label = (label + 1000.0) / 4000.0
+        utes = self.utes[0, :, :, :, item].squeeze()
+        ct = self.label[0, :, :, item].squeeze()
+        mask = self.mask[0, :, :, item].squeeze()
+
+        ct = (ct + 1000) / 4000
+
         mask = mask >= 0.5
 
-        input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
-
-        return input.float(), mask.bool(), label.float()
-
-    def __len__(self):
-        return self.length
-
-
-class PredictDataset(data.Dataset):
-    def __init__(self, input1, input2, mask, label):
-        super(PredictDataset, self).__init__()
-
-        # self.in1 = input1.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        # self.in2 = input2.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        # self.label = label.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-        # self.mask = mask.squeeze()[64:-64, 64:-64, 9:-9].contiguous()
-
-        # test = F.pad(input1, (23, 23, 0, 0, 0, 0))
-        pad = 128 - (torch.tensor(input1.squeeze().shape) % 128)
-        pad[pad == 128] = 0
-        pad_array = [0] * len(pad) * 2
-        pad_array[-2] = pad[-1].item()
-        pad_array = pad_array[::-1]
-
-        self.in1 = self.block_vol(F.pad(input1.squeeze(), pad_array))
-        self.in2 = self.block_vol(F.pad(input2.squeeze(), pad_array))
-        self.label = self.block_vol(F.pad(label.squeeze(), pad_array))
-        self.mask = self.block_vol(F.pad(mask.squeeze(), pad_array))
-        self.length = len(self.in1)
-
-    @staticmethod
-    def block_vol(vol):
-        # vol = F.pad(vol, [8, 8, 8, 8, 8, 8])
-        vol = vol.unfold(2, 128, 64).unfold(1, 128, 64).unfold(0, 128, 64).contiguous()
-        vol = vol.view(-1, 128, 128, 128).contiguous()
-
-
-        return vol
-
-    def __getitem__(self, item):
-        in1 = self.in1[item].squeeze()
-        in2 = self.in2[item].squeeze()
-        label = self.label[item].squeeze()
-        mask = self.mask[item].squeeze()
-
-        label = (label + 1000.0) / 4000.0
-        mask = mask >= 0.5
-
-        input = torch.stack((in1.squeeze(), in2.squeeze()), dim=0)
-
-        return input.float(), mask.bool(), label.float()
+        return utes.clone(), mask.bool(), ct.float()
 
     def __len__(self):
         return self.length

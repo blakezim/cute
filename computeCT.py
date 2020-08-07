@@ -24,7 +24,7 @@ from models import unet_model, vnet_model
 from scipy.io import loadmat, savemat
 from types import SimpleNamespace
 
-from dataset import TrainDataset, EvalDataset, PredictDataset
+from dataset import TrainDataset, EvalDataset
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
@@ -32,18 +32,18 @@ from torch.utils.data.sampler import SubsetRandomSampler, SequentialSampler
 
 parser = argparse.ArgumentParser(description='PyTorch Patch Based Super Deep Interpolation Example')
 
-parser.add_argument('-d', '--data_dir', type=str, default='./Data/PreProcessedData/Label005Data/',
+parser.add_argument('-d', '--data_dir', type=str, default='./Data/PreProcessedData/skull005_as_test/',
                     help='Path to data directory')
 parser.add_argument('-o', '--out_dir', type=str, default='./Output/', help='Path to output')
-parser.add_argument('--trainBatchSize', type=int, default=8, help='training batch size')
-parser.add_argument('--inferBatchSize', type=int, default=8, help='cross validation batch size')
+parser.add_argument('--trainBatchSize', type=int, default=64, help='training batch size')
+parser.add_argument('--inferBatchSize', type=int, default=64, help='cross validation batch size')
 parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.0001, help='Learning Rate')
 parser.add_argument('--cuda', action='store_true', help='use cuda?')
 parser.add_argument('--seed', type=int, default=358, help='random seed to use. Default=358')
 parser.add_argument('--threads', type=int, default=4, help='number of threads for data loader to use')
-parser.add_argument('--cube_size', type=int, default=[128, 128, 128], help='3D cube size')
-parser.add_argument('--eval_size', type=int, default=[128, 128, 128], help='3D cube size')
+# parser.add_argument('--cube_size', type=int, default=[128, 128, 128], help='3D cube size')
+# parser.add_argument('--eval_size', type=int, default=[128, 128, 128], help='3D cube size')
 parser.add_argument('-s', '--samples', type=int, default=200, help='how many samples from each volume')
 
 opt = parser.parse_args()
@@ -90,13 +90,13 @@ def _check_branch(opt, saved_dict, model=None):
             model.load_state_dict(model_gpu.module.state_dict())
     except:
         raise Exception(f'The checkpoint {opt.ckpt} could not be loaded into the given model.')
-
-    if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
-        msg = 'The model loaded, but you are not on the same branch or commit.'
-        msg += 'To check out the right branch, run the following in the repository: \n'
-        msg += f'git checkout {params.git_branch[0]}\n'
-        msg += f'git revert {params.git_hash[0]}'
-        raise Warning(msg)
+    #
+    # if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
+    #     msg = 'The model loaded, but you are not on the same branch or commit.'
+    #     msg += 'To check out the right branch, run the following in the repository: \n'
+        # msg += f'git checkout {params.git_branch[0]}\n'
+        # msg += f'git revert {params.git_hash[0]}'
+        # raise Warning(msg)
 
     return model, device
 
@@ -126,11 +126,13 @@ def add_figure(tensor, writer, title=None, text=None, text_start=[160, 200], tex
 
 def load_infer_data(opt):
     # load the training data
-    infer_input = torch.load(f'{opt.dataDirectory}/infer_input.pt')
-    infer_label = torch.load(f'{opt.dataDirectory}/infer_label.pt')
-    infer_masks = torch.load(f'{opt.dataDirectory}/infer_masks.pt')
+    inf_files = sorted([x for x in glob.glob(f'{opt.dataDirectory}/*') if 'infer' in x])
 
-    return infer_input[:, 0].squeeze(), infer_input[:, 1].squeeze(), infer_masks, infer_label
+    infer_input = torch.load([x for x in inf_files if 'input' in x][0])
+    infer_label = torch.load([x for x in inf_files if 'label' in x][0])
+    infer_masks = torch.load([x for x in inf_files if 'masks' in x][0])
+
+    return infer_input, infer_masks, infer_label
 
 
 def load_train_data(opt):
@@ -139,25 +141,24 @@ def load_train_data(opt):
     train_label = torch.load(f'{opt.dataDirectory}/train_label.pt')
     train_masks = torch.load(f'{opt.dataDirectory}/train_masks.pt')
 
-    return train_input[:, 0].squeeze(), train_input[:, 1].squeeze(), train_masks, train_label
+    return train_input, train_masks, train_label
 
 
 def get_loaders(opt):
-    input1, input2, mask, label = load_train_data(opt)
+    utes, mask, label = load_train_data(opt)
     samps = opt.samples
     train_length = int(label.shape[0]) * samps
 
-    train_dataset = TrainDataset(input1, input2, mask, label, train_length, opt.cube_size)
+    train_dataset = TrainDataset(utes, mask, label, train_length, opt)
     train_sampler = SubsetRandomSampler(range(0, train_length))
     train_loader = DataLoader(train_dataset, opt.trainBatchSize, sampler=train_sampler, num_workers=opt.threads)
 
-    input1, input2, mask, label = load_infer_data(opt)
-    if len(input1.shape) == 3:
-        input1 = input1.unsqueeze(0)
-        input2 = input2.unsqueeze(0)
+    utes, mask, label = load_infer_data(opt)
 
-    infer_dataset = EvalDataset(input1, input2, mask, label)
-    infer_sampler = SequentialSampler(range(0, len(infer_dataset)))
+    z_dims = utes.shape[-1] * utes.shape[0]
+
+    infer_dataset = EvalDataset(utes, mask, label, z_dims)
+    infer_sampler = SequentialSampler(range(0, z_dims))
     infer_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
 
     return train_loader, infer_loader
@@ -199,20 +200,19 @@ def learn(opt):
                 with torch.no_grad():
                     l1Loss = nn.L1Loss()
                     im = len(inputs) // 2
-                    sl = torch.max(mask[im].sum(0).sum(0), dim=0)[-1].item()
 
-                    mask_slice = mask[im, :, :, sl]
-                    label_slice = label[im, :, :, sl] * mask_slice
-                    pred_slice = pred[im, :, :, sl] * mask_slice
-                    input1_slice = inputs[im, 0, :, :, sl] * mask_slice
-                    input2_slice = inputs[im, 1, :, :, sl] * mask_slice
+                    mask_slice = mask[im, :, :]
+                    label_slice = label[im, :, :] * mask_slice
+                    pred_slice = pred[im, :, :] * mask_slice
+                    input1_slice = inputs[im, 0, :, :] * mask_slice
+                    input2_slice = inputs[im, 1, :, :] * mask_slice
 
                     add_figure(input1_slice, writer, title='Input 1', label='Train/Input1', cmap='viridis', epoch=epoch)
                     add_figure(input2_slice, writer, title='Input 2', label='Train/Input2', cmap='viridis', epoch=epoch)
 
                     # Add the prediction
                     pred_loss = l1Loss(pred_slice[mask_slice], label_slice[mask_slice])
-                    add_figure(pred_slice, writer, title='Predicted T1', label='Train/Pred CT', cmap='plasma',
+                    add_figure(pred_slice, writer, title='Predicted CT', label='Train/Pred CT', cmap='plasma',
                                epoch=epoch,
                                text=[f'Loss: {pred_loss.item():.4f}',
                                      f'Mean: {pred_slice[mask_slice].mean():.2f}',
@@ -220,7 +220,7 @@ def learn(opt):
                                      f'Max:  {pred_slice[mask_slice].max():.2f}'
                                      ], min_max=[0.0, 1.0], text_start=[5, 5], text_spacing=40)
                     # Add the stir
-                    add_figure(label_slice, writer, title='STIR T1', label='Train/Real CT', cmap='plasma', epoch=epoch,
+                    add_figure(label_slice, writer, title='Real CT', label='Train/Real CT', cmap='plasma', epoch=epoch,
                                text=[f'Mean: {label_slice[mask_slice].mean():.2f}',
                                      f'Min:  {label_slice[mask_slice].min():.2f}',
                                      f'Max:  {label_slice[mask_slice].max():.2f}'
@@ -257,22 +257,21 @@ def learn(opt):
 
                 if iteration == len(testing_data_loader) // 2:
                     im = len(inputs) // 4
-                    sl = torch.max(mask[im].sum(0).sum(0), dim=0)[-1].item()
 
                     l1Loss = nn.L1Loss()
-                    mask_slice = mask[im, :, :, sl]
-                    label_slice = label[im, :, :, sl] * mask_slice
-                    pred_slice = pred[im, :, :, sl] * mask_slice
+                    mask_slice = mask[im, :, :]
+                    label_slice = label[im, :, :] * mask_slice
+                    pred_slice = pred[im, :, :] * mask_slice
 
                     if epoch == 1:
                         # Add the input images - they are not going to change
-                        input1_slice = inputs[im, 0, :, :, sl] * mask_slice
-                        input2_slice = inputs[im, 1, :, :, sl] * mask_slice
+                        input1_slice = inputs[im, 0, :, :] * mask_slice
+                        input2_slice = inputs[im, 1, :, :] * mask_slice
                         add_figure(input1_slice, writer, title='Input 1', label='Infer/Input1', cmap='viridis',
                                    epoch=epoch)
                         add_figure(input2_slice, writer, title='Input 2', label='Infer/Input2', cmap='viridis',
                                    epoch=epoch)
-                        add_figure(label_slice, writer, title='STIR T1', label='Infer/Real CT', cmap='plasma',
+                        add_figure(label_slice, writer, title='Real CT', label='Infer/Real CT', cmap='plasma',
                                    epoch=epoch,
                                    text=[f'Mean: {label_slice[mask_slice].mean():.2f}',
                                          f'Min:  {label_slice[mask_slice].min():.2f}',
@@ -282,7 +281,7 @@ def learn(opt):
                     # Add the prediction
 
                     pred_loss = l1Loss(pred_slice[mask_slice], label_slice[mask_slice])
-                    add_figure(pred_slice, writer, title='Predicted T1', label='Infer/Pred T1', cmap='plasma',
+                    add_figure(pred_slice, writer, title='Predicted CT', label='Infer/Pred T1', cmap='plasma',
                                epoch=epoch,
                                text=[f'Loss: {pred_loss.item():.4f}',
                                      f'Mean: {pred_slice[mask_slice].mean():.2f}',
@@ -316,7 +315,7 @@ def learn(opt):
     training_data_loader, testing_data_loader = get_loaders(opt)
     print(' done')
 
-    model = vnet_model.VNet(2, 1)
+    model = unet_model.UNet(2, 1)
     model = model.to(device)
     model = nn.DataParallel(model)
 
@@ -453,10 +452,13 @@ def eval(opt):
         # print(f"===> Avg. MSE Loss: {e_loss / len(infer_loader):.6f}")
 
     pred_vol = torch.cat(preds, dim=0)
-    mask_vol = torch.cat(mask_vol, dim=0)
+    # mask_vol = torch.cat(mask_vol, dim=0)
     label_vol = torch.cat(label_vol, dim=0)
+    # input_vols = torch.cat(input_vols, dim=0)
+    # label_vol = torch.cat(label_vol, dim=0)
+
     pred_vol = pred_vol.view(7, 7, 7, 128, 128, 128)
-    mask_vol = mask_vol.view(7, 7, 7, 128, 128, 128)
+    # mask_vol = mask_vol.view(7, 7, 7, 128, 128, 128)
     label_vol = label_vol.view(7, 7, 7, 128, 128, 128)
 
     reshape_list = []
@@ -464,113 +466,132 @@ def eval(opt):
     vol1 = pred_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
     vol2 = pred_vol[1::2, 1::2, 1::2, :, :, :].permute(reshape_list).reshape(384, 384, 384)
 
-    mask_vol = mask_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
+    vol1[64:-64, 64:-64, 64:-64] = torch.stack((vol1[64:-64, 64:-64, 64:-64], vol2)).max(0)[0]
+    pred_vol = vol1.clone()
+    # mask_vol = mask_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
     label_vol = label_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
 
+    pred_vol = pred_vol[:, :, 0:402]
+    label_vol = label_vol[:, :, 0:402]
 
-    # out_vol = torch.zeros(512, 512, 512)
-    # out_vol[:, :, 0:384] = vol1.clone()
-
-    input_vols = torch.cat(input_vols, dim=0)
-    label_vol = torch.cat(label_vol, dim=0)
-
-    pred_vol = pred_vol * mask_vol
-    label_vol = label_vol * mask_vol
+    # pred_vol = pred_vol * mask_vol
+    # label_vol = label_vol * mask_vol
     pred_vol = (pred_vol * 4000.0) - 1000.0
     pred_vol[pred_vol < -1000.0] = -1000
     pred_vol[pred_vol > 3000.0] = 3000.0
-    pred_vol = pred_vol.permute(1, 2, 0)
+    # pred_vol = pred_vol.permute(1, 2, 0)
 
     label_vol = (label_vol * 4000.0) - 1000.0
     label_vol[label_vol < -1000.0] = -1000
     label_vol[label_vol > 3000.0] = 3000.0
-    label_vol = label_vol.permute(1, 2, 0)
+    # label_vol = label_vol.permute(1, 2, 0)
 
-    ute1 = input_vols[:, 0, :, :].permute(1, 2, 0)
-    ute2 = input_vols[:, 1, :, :].permute(1, 2, 0)
+    raw_file = sorted(glob.glob(f'{opt.rawDir}skull{opt.skull}*.mat'))[-1]
+    raw_dict = loadmat(raw_file)
+    ct_mask = torch.tensor(raw_dict['boneMask2'])
+    ct_mask = ct_mask >= 0.5
+    ct_mask = ct_mask.to(dtype=torch.float32)
 
-    downsample = True
-    if downsample:
-        raw_file = sorted(glob.glob(f'{opt.rawDir}skull{opt.skull}*.mat'))[0]
-        raw_dict = loadmat(raw_file)
-        zd = raw_dict['imsCT'].shape[-1]
-        import CAMP.Core as core
-        pred_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=pred_vol.unsqueeze(0))
-        pred_grid.set_size((pred_grid.shape()[1], pred_grid.shape()[2], zd))
-        label_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=label_vol.unsqueeze(0))
-        label_grid.set_size((label_grid.shape()[1], label_grid.shape()[2], zd))
-        ute1_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute1.unsqueeze(0))
-        ute1_grid.set_size((ute1_grid.shape()[1], ute1_grid.shape()[2], zd))
-        ute2_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute2.unsqueeze(0))
-        ute2_grid.set_size((ute2_grid.shape()[1], ute2_grid.shape()[2], zd))
+    label_vol *= ct_mask
+    pred_vol *= ct_mask
 
-        pred_vol = pred_grid.data.squeeze().cpu()
-        label_vol = label_grid.data.squeeze().cpu()
-        ute1 = ute1_grid.data.squeeze().cpu()
-        ute2 = ute2_grid.data.squeeze().cpu()
-
-    s = 80
-    save_fig = True
     fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
 
+    out_dict = {
+        'pred_CT': pred_vol.cpu().numpy(),
+        'real_CT': label_vol.cpu().numpy(),
+        'CT_mask': ct_mask.cpu().numpy(),
+    }
     if not os.path.exists(fig_dir):
         os.makedirs(fig_dir)
 
-    in1_im = ute1[:, :, s].squeeze().cpu()
-    in2_im = ute2[:, :, s].squeeze().cpu()
-    ct_im = label_vol[:, :, s].squeeze().cpu()
-    pred_im = pred_vol[:, :, s].squeeze().cpu()
+    savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
 
-    plt.figure()
-    plt.imshow(in1_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
-    plt.axis('off')
-    plt.title('UTE 1')
-    plt.colorbar()
-    if save_fig:
-        plt.savefig(f'{fig_dir}ute1.png', dpi=600, bbox_inches='tight', pad_inches=0,
-                    transparaent=True, facecolor=[0, 0, 0, 0])
+    # ute1 = input_vols[:, 0, :, :].permute(1, 2, 0)
+    # ute2 = input_vols[:, 1, :, :].permute(1, 2, 0)
 
-    plt.figure()
-    plt.imshow(in2_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
-    plt.axis('off')
-    plt.title('UTE 2')
-    plt.colorbar()
-    if save_fig:
-        plt.savefig(f'{fig_dir}ute2.png', dpi=600, bbox_inches='tight', pad_inches=0,
-                    transparaent=True, facecolor=[0, 0, 0, 0])
+    # downsample = True
+    # if downsample:
+    #     raw_file = sorted(glob.glob(f'{opt.rawDir}skull{opt.skull}*.mat'))[0]
+    #     raw_dict = loadmat(raw_file)
+    #     zd = raw_dict['imsCT'].shape[-1]
+    #     import CAMP.Core as core
+    #     pred_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=pred_vol.unsqueeze(0))
+    #     pred_grid.set_size((pred_grid.shape()[1], pred_grid.shape()[2], zd))
+    #     label_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=label_vol.unsqueeze(0))
+    #     label_grid.set_size((label_grid.shape()[1], label_grid.shape()[2], zd))
+    #     ute1_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute1.unsqueeze(0))
+    #     ute1_grid.set_size((ute1_grid.shape()[1], ute1_grid.shape()[2], zd))
+    #     ute2_grid = core.StructuredGrid(pred_vol.shape, device='cuda:1', tensor=ute2.unsqueeze(0))
+    #     ute2_grid.set_size((ute2_grid.shape()[1], ute2_grid.shape()[2], zd))
+    #
+    #     pred_vol = pred_grid.data.squeeze().cpu()
+    #     label_vol = label_grid.data.squeeze().cpu()
+    #     ute1 = ute1_grid.data.squeeze().cpu()
+    #     ute2 = ute2_grid.data.squeeze().cpu()
 
-    plt.figure()
-    plt.imshow(pred_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
-    plt.axis('off')
-    plt.title('Predicted CT')
-    plt.colorbar()
-    if save_fig:
-        plt.savefig(f'{fig_dir}pred_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
-                    transparaent=True, facecolor=[0, 0, 0, 0])
+    # s = 80
+    # save_fig = True
+    # fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
+    #
+    # if not os.path.exists(fig_dir):
+    #     os.makedirs(fig_dir)
 
-    plt.figure()
-    plt.imshow(ct_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
-    plt.axis('off')
-    plt.title('Real CT')
-    plt.colorbar()
-    if save_fig:
-        plt.savefig(f'{fig_dir}real_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
-                    transparaent=True, facecolor=[0, 0, 0, 0])
+    # in1_im = ute1[:, :, s].squeeze().cpu()
+    # in2_im = ute2[:, :, s].squeeze().cpu()
+    # ct_im = label_vol[:, :, s].squeeze().cpu()
+    # pred_im = pred_vol[:, :, s].squeeze().cpu()
+    #
+    # plt.figure()
+    # plt.imshow(in1_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
+    # plt.axis('off')
+    # plt.title('UTE 1')
+    # plt.colorbar()
+    # if save_fig:
+    #     plt.savefig(f'{fig_dir}ute1.png', dpi=600, bbox_inches='tight', pad_inches=0,
+    #                 transparaent=True, facecolor=[0, 0, 0, 0])
+    #
+    # plt.figure()
+    # plt.imshow(in2_im, vmin=in1_im.min(), vmax=in1_im.max(), cmap='plasma')
+    # plt.axis('off')
+    # plt.title('UTE 2')
+    # plt.colorbar()
+    # if save_fig:
+    #     plt.savefig(f'{fig_dir}ute2.png', dpi=600, bbox_inches='tight', pad_inches=0,
+    #                 transparaent=True, facecolor=[0, 0, 0, 0])
+    #
+    # plt.figure()
+    # plt.imshow(pred_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
+    # plt.axis('off')
+    # plt.title('Predicted CT')
+    # plt.colorbar()
+    # if save_fig:
+    #     plt.savefig(f'{fig_dir}pred_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
+    #                 transparaent=True, facecolor=[0, 0, 0, 0])
+    #
+    # plt.figure()
+    # plt.imshow(ct_im, vmin=-1000.0, vmax=3000.0, cmap='gray')
+    # plt.axis('off')
+    # plt.title('Real CT')
+    # plt.colorbar()
+    # if save_fig:
+    #     plt.savefig(f'{fig_dir}real_ct.png', dpi=600, bbox_inches='tight', pad_inches=0,
+    #                 transparaent=True, facecolor=[0, 0, 0, 0])
 
     # import CAMP.Core as core
     # import CAMP.FileIO as io
     # pred_vol_out = core.StructuredGrid(pred_vol.shape, device=device, tensor=pred_vol.unsqueeze(0))
     # io.SaveITKFile(pred_vol_out, )
 
-    # Generate the dictionary to save
-    out_dict = {
-        'pred_CT': pred_vol.cpu().numpy(),
-        'real_CT': label_vol.cpu().numpy(),
-        'UTE1': ute1.cpu().numpy(),
-        'UTE2': ute2.cpu().numpy()
-    }
-
-    savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
+    # # Generate the dictionary to save
+    # out_dict = {
+    #     'pred_CT': pred_vol.cpu().numpy(),
+    #     'real_CT': label_vol.cpu().numpy(),
+    #     'UTE1': ute1.cpu().numpy(),
+    #     'UTE2': ute2.cpu().numpy()
+    # }
+    #
+    # savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
 
 
 if __name__ == '__main__':
@@ -586,15 +607,13 @@ if __name__ == '__main__':
                 'scheduler': True,
                 'ckpt': None,
                 'seed': opt.seed,
-                'cube_size': opt.cube_size,
-                'eval_size': opt.eval_size,
                 'samples': opt.samples
                 }
 
     evalOpt = {'inferBatchSize': 16,
-               'skull': '005',
+               'skull': '004',
                'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
-               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-06-03-160958/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-06-22-215215/',
                'rawDir': '/hdscratch/ucair/CUTE/Data/RawData2/',
                'outDirectory': './Output/Predictions/',
                'cuda': True,
@@ -605,6 +624,6 @@ if __name__ == '__main__':
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    # learn(trainOpt)
-    eval(evalOpt)
+    learn(trainOpt)
+    # eval(evalOpt)
     print('All Done')
