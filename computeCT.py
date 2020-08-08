@@ -158,7 +158,7 @@ def get_loaders(opt):
     z_dims = utes.shape[-1] * utes.shape[0]
 
     infer_dataset = EvalDataset(utes, mask, label, z_dims)
-    infer_sampler = SequentialSampler(range(0, z_dims))
+    infer_sampler = SequentialSampler(range(0, z_dims - 2))
     infer_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
 
     return train_loader, infer_loader
@@ -316,7 +316,7 @@ def learn(opt):
     training_data_loader, testing_data_loader = get_loaders(opt)
     print(' done')
 
-    model = unet_model.UNet(2, 1)
+    model = unet_model.UNet(6, 1)
     model = model.to(device)
     model = nn.DataParallel(model)
 

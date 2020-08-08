@@ -106,14 +106,22 @@ class TrainDataset(data.Dataset):
         v = item % self.num_vols
         ims_shape = self.utes[v].shape
 
-        rand_slice = torch.LongTensor(1).random_(ims_shape[self.dim + 1])
+        rand_slice = torch.LongTensor(1).random_(ims_shape[self.dim + 1] - 2) + 1
 
-        slicer_obj = [slice(ims_shape[0]), slice(ims_shape[1]), slice(ims_shape[2]), slice(ims_shape[3])]
-        slicer_obj[self.dim + 1] = slice(rand_slice.item(), rand_slice.item() + 1)
+        slicer_sing = [slice(ims_shape[0]), slice(ims_shape[1]), slice(ims_shape[2]), slice(ims_shape[3])]
+        slicer_mult = [slice(ims_shape[0]), slice(ims_shape[1]), slice(ims_shape[2]), slice(ims_shape[3])]
+        slicer_sing[self.dim + 1] = slice(rand_slice.item(), rand_slice.item() + 1)
+        slicer_mult[self.dim + 1] = slice(rand_slice.item() - 1, rand_slice.item() + 2)
 
-        utes = self.utes[v][slicer_obj].squeeze(self.dim + 1)
-        ct = self.label[v][slicer_obj[1:]].squeeze()
-        mask = self.mask[v][slicer_obj[1:]].squeeze()
+        utes = self.utes[v][slicer_mult].squeeze()
+
+        ex_dims = list(range(1, 4))
+        ex_dims.remove(self.dim + 1)
+        perm = [0, self.dim + 1] + ex_dims
+
+        utes = utes.permute(perm).contiguous().view(-1, 448, 448)
+        ct = self.label[v][slicer_sing[1:]].squeeze()
+        mask = self.mask[v][slicer_sing[1:]].squeeze()
 
         # Spatially trasform the source and target
         utes, mask, ct = self.spatial_transform(utes, mask, ct)
@@ -144,9 +152,11 @@ class EvalDataset(data.Dataset):
 
     def __getitem__(self, item):
 
-        utes = self.utes[0, :, :, :, item].squeeze()
-        ct = self.label[0, :, :, item].squeeze()
-        mask = self.mask[0, :, :, item].squeeze()
+        utes = self.utes[0, :, :, :, item: item + 3].squeeze()
+        utes = utes.permute([0, 3, 1, 2]).contiguous().view(-1, 448, 448)
+
+        ct = self.label[0, :, :, item + 1].squeeze()
+        mask = self.mask[0, :, :, item + 1].squeeze()
 
         ct = (ct + 1000) / 4000
 

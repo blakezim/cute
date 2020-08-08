@@ -13,8 +13,8 @@ class UNet(nn.Module):
         self.up2 = up(256, 64)
         self.up3 = up(128, 32)
         self.up4 = up(64, 32)
-        self.outc = outconv(32, 6)
-        self.linear1 = nn.Conv2d(8, 32, 3, padding=1)
+        self.outc = outconv(32, 24)
+        self.linear1 = nn.Conv2d(n_channels + 24, 32, 3, padding=1)
         self.linear2 = nn.Conv2d(32, 64, 1)
         self.linear3 = nn.Conv2d(64, n_classes, 1)
 

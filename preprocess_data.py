@@ -44,12 +44,12 @@ def process_network_data(files):
         mat_dict = loadmat(skull)
         skull_num = skull.split('/')[-1].split('_')[0]
 
-        if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
-            print('Using High Res')
-            ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
-            utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
-        else:
-            utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
+        # if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
+        #     print('Using High Res')
+        #     ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
+        #     utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
+        # else:
+        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
 
         s = utes.shape
         means = torch.mean(utes[:, s[1] // 2 - 20: s[1] // 2 + 20, s[2] // 2 - 20: s[2] // 2 + 20,
@@ -107,12 +107,12 @@ def process_test_data(files):
         print(f'Processing {skull.split("/")[-1].split("_")[0]} ... ')
         mat_dict = loadmat(skull)
         skull_num = skull.split('/')[-1].split('_')[0]
-        if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
-            print('Using High Res')
-            ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
-            utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
-        else:
-            utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
+        # if os.path.exists(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat'):
+        #     print('Using High Res')
+        #     ute_mat = loadmat(f'{skull.split("skull")[0]}{skull_num}_registered_UTEtoCT_FlexSpine.mat')
+        #     utes = torch.tensor(ute_mat['imsUTEreg2']).permute([-1] + list(range(0, 3)))
+        # else:
+        utes = torch.tensor(mat_dict['imsUTEreg']).permute([-1] + list(range(0, 3)))
 
         s = utes.shape
         means = torch.mean(utes[:, s[1] // 2 - 20: s[1] // 2 + 20, s[2] // 2 - 20: s[2] // 2 + 20,
@@ -142,19 +142,26 @@ def process_data(opt):
     files = sorted(glob.glob(f'{data_path}/*.mat'))
     files = [x for x in files if 'workspace' in x]
 
-    test_file = files.pop(files.index([x for x in files if f'skull{opt.skull:03d}' in x][0]))
-    infer_file = files.pop(np.random.randint(0, len(files)))
-    train_files = files
+    out_path = f'./Data/PreProcessedData/skull{opt.skull:03d}_as_test/'
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
 
-    infer_skull = f'skull{infer_file.split("skull")[-1].split("_")[0]}'
+    # Check the save path for a infer skull
+    inf_files = sorted([x for x in glob.glob(f'{out_path}/*') if 'infer' in x])
+
+    if inf_files:
+        infer_skull = f'skull{inf_files[0].split("skull")[-1].split("_")[0]}'
+        infer_file = files.pop(files.index([x for x in files if infer_skull in x][0]))
+    else:
+        infer_file = files.pop(np.random.randint(0, len(files)))
+        infer_skull = f'skull{infer_file.split("skull")[-1].split("_")[0]}'
+
+    test_file = files.pop(files.index([x for x in files if f'skull{opt.skull:03d}' in x][0]))
+    train_files = files
 
     train_input, train_masks, train_label = process_network_data(train_files)
     infer_input, infer_masks, infer_label = process_network_data([infer_file])
     test_input, test_masks, test_label = process_test_data([test_file])
-
-    out_path = f'./Data/PreProcessedData/skull{opt.skull:03d}_as_test/'
-    if not os.path.exists(out_path):
-        os.makedirs(out_path)
 
     print('Saving ... ', end='')
     torch.save(train_input, f'{out_path}/train_input.pt')
