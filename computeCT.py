@@ -235,7 +235,7 @@ def learn(opt):
         e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
         writer.add_scalar('Epoch/Avg. MSE Loss', e_loss, epoch)
         # print(f"===> Avg. Loss: {e_loss:.6f}")
-        print("===> Epoch {} Complete: Avg. Loss: {:.6f}".format(epoch, e_loss)
+        print("===> Epoch {} Complete: Avg. Loss: {:.6f}".format(epoch, e_loss))
         scheduler.step(e_loss / len(training_data_loader))
 
     def infer(epoch):
