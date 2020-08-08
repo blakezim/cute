@@ -234,7 +234,8 @@ def learn(opt):
 
         e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
         writer.add_scalar('Epoch/Avg. MSE Loss', e_loss, epoch)
-        print(f"===> Avg. Loss: {e_loss:.6f}")
+        # print(f"===> Avg. Loss: {e_loss:.6f}")
+        print("===> Epoch {} Complete: Avg. Loss: {:.6f}".format(epoch, e_loss)
         scheduler.step(e_loss / len(training_data_loader))
 
     def infer(epoch):
@@ -263,7 +264,7 @@ def learn(opt):
                     label_slice = label[im, :, :] * mask_slice
                     pred_slice = pred[im, :, :] * mask_slice
 
-                    if epoch == 1:
+                    if epoch == 10:
                         # Add the input images - they are not going to change
                         input1_slice = inputs[im, 0, :, :] * mask_slice
                         input2_slice = inputs[im, 1, :, :] * mask_slice
