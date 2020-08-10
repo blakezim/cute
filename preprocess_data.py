@@ -26,7 +26,7 @@ parser.add_argument('-d', '--data_path', type=str, default='/hdscratch/ucair/CUT
                     help='Raw Data Path')
 parser.add_argument('-o', '--out_path', type=str, default='./Data/PreProcessedData/Label003Data_HR/',
                     help='Path to save data')
-parser.add_argument('-s', '--skull', type=int, default=5,
+parser.add_argument('-s', '--skull', type=int, default=1,
                     help='Path to save data')
 opt = parser.parse_args()
 

@@ -180,7 +180,7 @@ def learn(opt):
         n_samps = []
         b_losses = []
         # crit = nn.MSELoss(reduction='none')
-        crit = nn.L1Loss()
+        crit = nn.MSELoss()
 
         for iteration, batch in enumerate(training_data_loader, 1):
             inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
@@ -198,7 +198,7 @@ def learn(opt):
 
             if iteration == len(training_data_loader) // 2 and epoch % 10 == 0:
                 with torch.no_grad():
-                    l1Loss = nn.L1Loss()
+                    l1Loss = nn.MSELoss()
                     im = len(inputs) // 2
 
                     mask_slice = mask[im, :, :]
@@ -242,7 +242,7 @@ def learn(opt):
         # crit = nn.MSELoss(reduction='none')
         n_samps = []
         b_losses = []
-        crit = nn.L1Loss()
+        crit = nn.MSELoss()
 
         print('===> Evaluating Model')
         with torch.no_grad():
@@ -259,7 +259,7 @@ def learn(opt):
                 if iteration == len(testing_data_loader) // 2 and epoch % 10 == 0:
                     im = len(inputs) // 4
 
-                    l1Loss = nn.L1Loss()
+                    l1Loss = nn.MSELoss()
                     mask_slice = mask[im, :, :]
                     label_slice = label[im, :, :] * mask_slice
                     pred_slice = pred[im, :, :] * mask_slice
