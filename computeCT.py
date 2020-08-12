@@ -8,6 +8,7 @@ import glob
 import torch.nn as nn
 import subprocess as sp
 import torch.optim as optim
+import SimpleITK as sitk
 import argparse
 import numpy as np
 # import SimpleITK as sitk
@@ -94,9 +95,9 @@ def _check_branch(opt, saved_dict, model=None):
     # if saved_dict.git_branch != opt.git_branch or saved_dict.git_hash != opt.git_hash:
     #     msg = 'The model loaded, but you are not on the same branch or commit.'
     #     msg += 'To check out the right branch, run the following in the repository: \n'
-        # msg += f'git checkout {params.git_branch[0]}\n'
-        # msg += f'git revert {params.git_hash[0]}'
-        # raise Warning(msg)
+    # msg += f'git checkout {params.git_branch[0]}\n'
+    # msg += f'git revert {params.git_hash[0]}'
+    # raise Warning(msg)
 
     return model, device
 
@@ -144,6 +145,15 @@ def load_train_data(opt):
     return train_input, train_masks, train_label
 
 
+def load_test_data(opt):
+    # load the testing data
+    train_input = torch.load(f'{opt.dataDirectory}/skull{opt.skull}_test_input.pt')
+    train_label = torch.load(f'{opt.dataDirectory}/skull{opt.skull}_test_label.pt')
+    train_masks = torch.load(f'{opt.dataDirectory}/skull{opt.skull}_test_masks.pt')
+
+    return train_input, train_masks, train_label
+
+
 def get_loaders(opt):
     utes, mask, label = load_train_data(opt)
     samps = opt.samples
@@ -162,6 +172,68 @@ def get_loaders(opt):
     infer_loader = DataLoader(infer_dataset, opt.inferBatchSize, sampler=infer_sampler, num_workers=opt.threads)
 
     return train_loader, infer_loader
+
+
+def WriteDICOM(grid, folder):
+
+    dim = len(grid.size)
+
+    # Need to put the vector in the last dimension
+    vector_grid = grid.data.permute(list(range(1, dim +1)) + [0]).squeeze()  # it will always be this size now
+
+    if dim == 2 and vector_grid.shape[-1] == 3:
+        itk_image = sitk.GetImageFromArray(vector_grid.cpu().numpy(), isVector=True)
+    # elif dim == 2:
+    #     itk_image = sitk.GetImageFromArray(vector_grid.unsqueeze(-2).cpu().numpy())
+    else:
+        itk_image = sitk.GetImageFromArray(vector_grid.cpu().numpy())
+
+    spacing = grid.spacing.tolist()
+    if dim == 2:
+        spacing = [1.0] + spacing
+
+    origin = grid.origin.tolist()
+    if dim == 2:
+        origin = [1.0] + origin
+
+    # ITK ordering is x, y, z. But numpy is z, y, x
+    itk_image.SetSpacing(spacing[::-1])
+    itk_image.SetOrigin(origin[::-1])
+
+    if not os.path.exists(f'{folder}'):
+        os.makedirs(f'{folder}')
+
+    writer = sitk.ImageFileWriter()
+    writer.KeepOriginalImageUIDOn()
+
+    modification_time = time.strftime("%H%M%S")
+    modification_date = time.strftime("%Y%m%d")
+
+    direction = itk_image.GetDirection()
+    series_tag_values = [("0008|0060", 'CT'),
+                         ("0020|000e", "1.2.826.0.1.3680043.2.1125." + modification_date + ".1" + modification_time),
+                         ("0020|0037", '\\'.join(map(str, (direction[0], direction[3], direction[6],
+                                                           direction[1], direction[4], direction[7]))))]
+
+    castFilter = sitk.CastImageFilter()
+    castFilter.SetOutputPixelType(sitk.sitkInt16)
+    for i in range(itk_image.GetDepth()):
+        image_slice = itk_image[:, :, i]
+        image_slice = castFilter.Execute(image_slice)
+        # Tags shared by the series.
+        for tag, value in series_tag_values:
+            image_slice.SetMetaData(tag, value)
+        # Slice specific tags.
+        # image_slice.SetMetaData("0020|000d", '1.2.826.0.1.3680043.2.1125.1.66897271260407186792894744070373029')
+        # image_slice.SetMetaData("0020|000e", '1.2.826.0.1.3680043.2.1125.1.91514226971117938304888529649661939')
+        image_slice.SetMetaData("0008|0012", time.strftime("%Y%m%d"))  # Instance Creation Date
+        image_slice.SetMetaData("0008|0013", time.strftime("%H%M%S"))  # Instance Creation Time
+        image_slice.SetMetaData("0020|0032", '\\'.join(
+            map(str, itk_image.TransformIndexToPhysicalPoint((0, 0, i)))))  # Image Position (Patient)
+        # image_slice.SetMetaData("0020,0013", str(i))  # Instance Number
+        # Write to the output directory and add the extension dcm, to force writing in DICOM format.
+        writer.SetFileName(f'{folder}/{i:03d}.dcm')
+        writer.Execute(image_slice)
 
 
 def learn(opt):
@@ -352,32 +424,19 @@ def eval(opt):
     # files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
 
     print('===> Loading Data ... ', end='')
-    # mat_dict = loadmat(files[0])  # 002
-    # mat_dict = loadmat(files[1])  # 003
-    # mat_dict = loadmat(files[2])  # 005
-    opt.dataDirectory = f'{opt.dataDirectory}/Label{opt.skull}Data_HR/'
+    opt.dataDirectory = f'{opt.dataDirectory}/skull{opt.skull}_as_test/'
 
-    input1, input2, mask, label = load_infer_data(opt)
-    if len(input1.shape) == 3:
-        input1 = input1.unsqueeze(0)
-        input2 = input2.unsqueeze(0)
+    inputs, mask, label = load_test_data(opt)
 
-    # inputs = torch.cat((input1, input2), dim=0)
-    # inputs = F.pad(inputs, (55, 55, 0, 0, 0, 0)).unsqueeze(0).contiguous()
-    # inputs = inputs[:, :, ::2, ::2, ::2].contiguous()
+    inputs = inputs.squeeze().unfold(-1, 3, 1).permute((0, 4, 1, 2, 3)).contiguous()
+    inputs = inputs.view(-1, 512, 512, 400).permute(3, 0, 1, 2).split(64, 0)
 
-    dataset = PredictDataset(input1, input2, mask, label)
-    sampler = SequentialSampler(range(0, len(dataset)))
-    loader = DataLoader(dataset, opt.inferBatchSize, sampler=sampler, num_workers=opt.threads)
+    masks = mask.squeeze().unfold(-1, 3, 1).permute((3, 0, 1, 2)).contiguous()
+    masks = masks.permute(3, 0, 1, 2)[:, 1].split(64, 0)
 
-    # ute1 = torch.tensor(mat_dict['Ims1reg'])
-    # ute2 = torch.tensor(mat_dict['Ims2reg'])
-    # ct = torch.tensor(mat_dict['imsCTreg'])
-    # ct_mask = torch.tensor(mat_dict['UTEbinaryMaskReg'])
-    #
-    # infer_dataset = EvalDataset(ute1, ute2, ct_mask, ct, int(ct.shape[-1]))
-    # infer_sampler = SequentialSampler(range(0, int(ct.shape[-1])))
-    # eval_loader = DataLoader(infer_dataset, opt.evalBatchSize, sampler=infer_sampler, num_workers=opt.threads)
+    label = label.squeeze().unfold(-1, 3, 1).permute((3, 0, 1, 2)).contiguous()
+    label = label.permute(3, 0, 1, 2)[:, 1]
+    label = ((label + 1000) / 4000).split(64, 0)
     print('done')
 
     print('===> Loading Model ... ', end='')
@@ -392,12 +451,12 @@ def eval(opt):
         model_file = models[-1].split('/')[-1]
         opt.ckpt = f'{lasttime}/{model_file}'
 
-    model = vnet_model.VNet(2, 1)
+    model = unet_model.UNet(6, 1)
     saved_dict = SimpleNamespace(**torch.load(f'{opt.model_dir}{opt.ckpt}'))
     model, device = _check_branch(opt, saved_dict, model)
     print('done')
 
-    crit = nn.L1Loss()
+    crit = nn.MSELoss()
     e_loss = 0.0
     preds = []
     input_vols = []
@@ -409,8 +468,8 @@ def eval(opt):
     print('===> Evaluating Model')
     with torch.no_grad():
         model.eval()
-        for iteration, batch in enumerate(loader, 1):
-            inputs, mask, label = batch[0].to(device=device), batch[1].to(device=device), batch[2].to(device=device)
+        for i, f, m, l in zip(range(1, len(inputs) + 1), inputs, masks, label):
+            inputs, mask, label = f.to(device=device), m.to(device=device), l.to(device=device)
 
             n_samps.append(mask.sum().item())
             pred = model(inputs).squeeze()
@@ -423,7 +482,7 @@ def eval(opt):
             label_vol.append(label.clone().cpu())
             mask_vol.append(mask.clone().cpu())
 
-            print(f"=> Done with {iteration} / {len(loader)}  Batch Loss: {b_loss:.6f}")
+            print(f"=> Done with {i} / {len(inputs)}  Batch Loss: {b_loss:.6f}")
 
         e_loss = (torch.tensor(n_samps) * torch.tensor(b_losses)).sum() / torch.tensor(n_samps).sum()
         print(f"===> Avg. Loss: {e_loss:.6f}")
@@ -452,28 +511,11 @@ def eval(opt):
         #
         # print(f"===> Avg. MSE Loss: {e_loss / len(infer_loader):.6f}")
 
-    pred_vol = torch.cat(preds, dim=0)
-    # mask_vol = torch.cat(mask_vol, dim=0)
-    label_vol = torch.cat(label_vol, dim=0)
+    pred_vol = F.pad(torch.cat(preds, dim=0), [0, 0, 0, 0, 1, 1])
+    # mask_vol = F.pad(torch.cat(mask_vol, dim=0), [0, 0, 0, 0, 1, 1])
+    label_vol = F.pad(torch.cat(label_vol, dim=0), [0, 0, 0, 0, 1, 1])
     # input_vols = torch.cat(input_vols, dim=0)
     # label_vol = torch.cat(label_vol, dim=0)
-
-    pred_vol = pred_vol.view(7, 7, 7, 128, 128, 128)
-    # mask_vol = mask_vol.view(7, 7, 7, 128, 128, 128)
-    label_vol = label_vol.view(7, 7, 7, 128, 128, 128)
-
-    reshape_list = []
-    _ = [reshape_list.extend([x, y]) for x, y in zip(list(range(0, 3)), list(range(3, 6))[::-1])]
-    vol1 = pred_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
-    vol2 = pred_vol[1::2, 1::2, 1::2, :, :, :].permute(reshape_list).reshape(384, 384, 384)
-
-    vol1[64:-64, 64:-64, 64:-64] = torch.stack((vol1[64:-64, 64:-64, 64:-64], vol2)).max(0)[0]
-    pred_vol = vol1.clone()
-    # mask_vol = mask_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
-    label_vol = label_vol[::2, ::2, ::2, :, :, :].permute(reshape_list).reshape(512, 512, 512)
-
-    pred_vol = pred_vol[:, :, 0:402]
-    label_vol = label_vol[:, :, 0:402]
 
     # pred_vol = pred_vol * mask_vol
     # label_vol = label_vol * mask_vol
@@ -489,24 +531,43 @@ def eval(opt):
 
     raw_file = sorted(glob.glob(f'{opt.rawDir}skull{opt.skull}*.mat'))[-1]
     raw_dict = loadmat(raw_file)
-    ct_mask = torch.tensor(raw_dict['boneMask2'])
+    ct_mask = torch.tensor(raw_dict['boneMask2']).permute(2, 0, 1)
     ct_mask = ct_mask >= 0.5
     ct_mask = ct_mask.to(dtype=torch.float32)
 
     label_vol *= ct_mask
     pred_vol *= ct_mask
 
-    fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
+    import CAMP.Core as core
+    import CAMP.FileIO as io
+    import CAMP.StructuredGridTools as st
+    import CAMP.UnstructuredGridOperators as uo
+    import CAMP.StructuredGridOperators as so
 
-    out_dict = {
-        'pred_CT': pred_vol.cpu().numpy(),
-        'real_CT': label_vol.cpu().numpy(),
-        'CT_mask': ct_mask.cpu().numpy(),
-    }
-    if not os.path.exists(fig_dir):
-        os.makedirs(fig_dir)
+    out_pred = core.StructuredGrid(pred_vol.shape, tensor=pred_vol.unsqueeze(0))
+    out_label = core.StructuredGrid(label_vol.shape, tensor=label_vol.unsqueeze(0))
 
-    savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
+    print('Saving ... ', end='')
+
+    WriteDICOM(out_pred, f'{opt.outDirectory}/skull{opt.skull}/skull{opt.skull}_prediction/')
+    WriteDICOM(out_label, f'{opt.outDirectory}/skull{opt.skull}/skull{opt.skull}_label/')
+
+    io.SaveITKFile(out_pred, f'{opt.outDirectory}/skull{opt.skull}/prediction_volume.nii.gz')
+    io.SaveITKFile(out_label, f'{opt.outDirectory}/skull{opt.skull}/label_volume.nii.gz')
+
+    print('done')
+
+    # fig_dir = f'./Output/figures/{opt.model_dir.split("/")[-2]}/'
+    #
+    # out_dict = {
+    #     'pred_CT': pred_vol.cpu().numpy(),
+    #     'real_CT': label_vol.cpu().numpy(),
+    #     'CT_mask': ct_mask.cpu().numpy(),
+    # }
+    # if not os.path.exists(fig_dir):
+    #     os.makedirs(fig_dir)
+    #
+    # savemat(f'{fig_dir}/Skull{opt.skull}_NN_Output.mat', out_dict)
 
     # ute1 = input_vols[:, 0, :, :].permute(1, 2, 0)
     # ute2 = input_vols[:, 1, :, :].permute(1, 2, 0)
@@ -612,19 +673,19 @@ if __name__ == '__main__':
                 }
 
     evalOpt = {'inferBatchSize': 16,
-               'skull': '004',
+               'skull': '005',
                'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
-               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-06-22-215215/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-08-09-192025/',
                'rawDir': '/hdscratch/ucair/CUTE/Data/RawData2/',
-               'outDirectory': './Output/Predictions/',
+               'outDirectory': './Output/predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': 'epoch_00500_model.pth'
+               'ckpt': 'epoch_00490_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    learn(trainOpt)
-    # eval(evalOpt)
+    # learn(trainOpt)
+    eval(evalOpt)
     print('All Done')
