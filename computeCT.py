@@ -686,6 +686,6 @@ if __name__ == '__main__':
     evalOpt = SimpleNamespace(**evalOpt)
     trainOpt = SimpleNamespace(**trainOpt)
 
-    # learn(trainOpt)
-    eval(evalOpt)
+    learn(trainOpt)
+    # eval(evalOpt)
     print('All Done')
