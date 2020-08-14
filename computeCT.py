@@ -544,8 +544,8 @@ def eval(opt):
     import CAMP.UnstructuredGridOperators as uo
     import CAMP.StructuredGridOperators as so
 
-    out_pred = core.StructuredGrid(pred_vol.shape, tensor=pred_vol.unsqueeze(0))
-    out_label = core.StructuredGrid(label_vol.shape, tensor=label_vol.unsqueeze(0))
+    out_pred = core.StructuredGrid(pred_vol.shape, tensor=pred_vol.unsqueeze(0), spacing=[0.48, 0.48, 0.48])
+    out_label = core.StructuredGrid(label_vol.shape, tensor=label_vol.unsqueeze(0), spacing=[0.48, 0.48, 0.48])
 
     print('Saving ... ', end='')
 
@@ -675,12 +675,12 @@ if __name__ == '__main__':
     evalOpt = {'inferBatchSize': 16,
                'skull': '005',
                'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
-               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-08-09-192025/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-08-13-133702/',
                'rawDir': '/hdscratch/ucair/CUTE/Data/RawData2/',
                'outDirectory': './Output/predictions/',
                'cuda': True,
                'threads': 0,
-               'ckpt': 'epoch_00490_model.pth'
+               'ckpt': 'epoch_00310_model.pth'
                }
 
     evalOpt = SimpleNamespace(**evalOpt)

@@ -26,7 +26,7 @@ parser.add_argument('-d', '--data_path', type=str, default='/hdscratch/ucair/CUT
                     help='Raw Data Path')
 parser.add_argument('-o', '--out_path', type=str, default='./Data/PreProcessedData/Label003Data_HR/',
                     help='Path to save data')
-parser.add_argument('-s', '--skull', type=int, default=1,
+parser.add_argument('-s', '--skull', type=int, default=5,
                     help='Path to save data')
 opt = parser.parse_args()
 
@@ -58,7 +58,8 @@ def process_network_data(files):
         ct = torch.tensor(mat_dict['imsCTreg'])
         ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
+        # ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
+        ct_mask = torch.tensor(ct_mask)
 
         nz_z = torch.LongTensor([i for i in range(0, ct.shape[-1]) if ct_mask[:, :, i].sum() != 0][1:-1])
         nz_y = torch.LongTensor([i for i in range(0, ct.shape[-2]) if ct_mask[:, i, :].sum() != 0][1:-1])
@@ -121,7 +122,8 @@ def process_test_data(files):
         ct = torch.tensor(mat_dict['imsCTreg'])
         ct_mask = torch.tensor(mat_dict['boneMask2'])
 
-        ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
+        # ct_mask = torch.tensor(binary_dilation(ct_mask, iterations=2))
+        ct_mask = torch.tensor(ct_mask)
 
         inputs.append(utes)
         masks.append(ct_mask)
@@ -155,6 +157,8 @@ def process_data(opt):
     else:
         infer_file = files.pop(np.random.randint(0, len(files)))
         infer_skull = f'skull{infer_file.split("skull")[-1].split("_")[0]}'
+
+    out_path = f'./Data/PreProcessedData/skull{opt.skull:03d}_as_test_nd/'
 
     test_file = files.pop(files.index([x for x in files if f'skull{opt.skull:03d}' in x][0]))
     train_files = files
