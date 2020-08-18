@@ -1,15 +1,7 @@
 import torch
+import torch.nn as nn
+import kornia.augmentation as ka
 import torch.utils.data as data
-import torch.nn.functional as F
-import torchvision.transforms.functional as TF
-
-from PIL.Image import BILINEAR
-
-
-# import matplotlib
-# matplotlib.use('qt5agg')
-# import matplotlib.pyplot as plt
-# plt.ion()
 
 
 class TrainDataset(data.Dataset):
@@ -25,72 +17,14 @@ class TrainDataset(data.Dataset):
 
         self.batch_size = opt.trainBatchSize
 
+        self.spatial = nn.Sequential(
+            ka.RandomAffine(45, translate=(0.1, 0.1), scale=(0.85, 1.15), shear=(0.1, 0.1),
+                            same_on_batch=True),
+            ka.RandomVerticalFlip(same_on_batch=True),
+            ka.RandomHorizontalFlip(same_on_batch=True)
+        )
         self.dim = 2
         self.counter = 0
-
-    def spatial_transform(self, ute, mask, ct):
-
-        vflip = torch.rand(1).item() > 0.5
-        hflip = torch.rand(1).item() > 0.5
-        deg = torch.LongTensor(1).random_(-10, 10).item()
-        scale = torch.FloatTensor(1).uniform_(0.8, 1.2)
-        translate = tuple(torch.FloatTensor(2).uniform_(0.0, 0.10).tolist())
-        shear = torch.FloatTensor(1).uniform_(0.0, 3.0).item()
-
-        image_list = [ute, mask, ct]
-        for i, p in enumerate(image_list):
-
-            if len(p.shape) > 2:
-                for s in range(p.shape[0]):
-                    sl = p[s]
-                    dtype = sl.dtype
-
-                    sl_min = sl.min()
-                    sl_max = sl.max()
-
-                    sl = (sl - sl_min) / ((sl_max - sl_min) + 0.001)
-
-                    sl = TF.to_pil_image(sl.float())
-                    if vflip:
-                        sl = TF.vflip(sl)
-                    if hflip:
-                        sl = TF.hflip(sl)
-
-                    sl = TF.affine(sl, deg, scale=scale, translate=translate, shear=shear, resample=BILINEAR)
-                    sl = TF.to_tensor(sl).squeeze()
-                    if dtype == torch.int64:
-                        sl = sl.round()
-                    sl = sl.to(dtype=dtype)
-
-                    sl = (sl * ((sl_max - sl_min) + 0.001)) + sl_min
-                    p[s] = sl
-                noise = torch.FloatTensor(p.size()).normal_(0, 0.05)
-                p = (p + noise).clone()
-
-            else:
-                p_min = p.min()
-                p_max = p.max()
-
-                p = (p - p_min) / ((p_max - p_min) + 0.001)
-
-                p = TF.to_pil_image(p.float())
-                if vflip:
-                    p = TF.vflip(p)
-                if hflip:
-                    p = TF.hflip(p)
-
-                p = TF.affine(p, deg, scale=scale, translate=translate, shear=shear, resample=BILINEAR)
-                p = TF.to_tensor(p).squeeze()
-                if dtype == torch.int64:
-                    p = p.round()
-                p = p.to(dtype=dtype)
-
-                p = (p * ((p_max - p_min) + 0.001)) + p_min
-
-            image_list[i] = p.clone()
-        ute, mask, ct = image_list
-
-        return ute, mask, ct
 
     def __getitem__(self, item):
         # import matplotlib
@@ -123,16 +57,19 @@ class TrainDataset(data.Dataset):
         ct = self.label[v][slicer_sing[1:]].squeeze()
         mask = self.mask[v][slicer_sing[1:]].squeeze()
 
-        # Spatially trasform the source and target
-        utes, mask, ct = self.spatial_transform(utes, mask, ct)
+        params = torch.cat([utes, ct.unsqueeze(0), mask.unsqueeze(0)])
+        params = self.spatial(params).squeeze()
+        inputs = params[:-2]
+        label = params[-2].squeeze()
+        mask = params[-1].squeeze()
 
-        ct = (ct + 1000) / 4000
+        label = (label + 1000) / 4000
 
         mask = mask >= 0.5
 
         self.counter += 1
 
-        return utes.clone(), mask.bool(), ct.float()
+        return inputs.clone(), mask.bool(), label.float()
 
     def __len__(self):
         return self.length

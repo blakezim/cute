@@ -424,7 +424,7 @@ def eval(opt):
     # files = sorted(glob.glob(f'{opt.dataDirectory}/*'))
 
     print('===> Loading Data ... ', end='')
-    opt.dataDirectory = f'{opt.dataDirectory}/skull{opt.skull}_as_test/'
+    opt.dataDirectory = f'{opt.dataDirectory}/skull{opt.skull}_as_test_ed/'
 
     inputs, mask, label = load_test_data(opt)
 
@@ -469,7 +469,7 @@ def eval(opt):
     with torch.no_grad():
         model.eval()
         for i, f, m, l in zip(range(1, len(inputs) + 1), inputs, masks, label):
-            inputs, mask, label = f.to(device=device), m.to(device=device), l.to(device=device)
+            inputs, mask, label = f.to(device=device), m.to(device=device).bool(), l.to(device=device)
 
             n_samps.append(mask.sum().item())
             pred = model(inputs).squeeze()
@@ -535,8 +535,8 @@ def eval(opt):
     ct_mask = ct_mask >= 0.5
     ct_mask = ct_mask.to(dtype=torch.float32)
 
-    label_vol *= ct_mask
-    pred_vol *= ct_mask
+    # label_vol *= ct_mask
+    # pred_vol *= ct_mask
 
     import CAMP.Core as core
     import CAMP.FileIO as io
@@ -546,14 +546,30 @@ def eval(opt):
 
     out_pred = core.StructuredGrid(pred_vol.shape, tensor=pred_vol.unsqueeze(0), spacing=[0.48, 0.48, 0.48])
     out_label = core.StructuredGrid(label_vol.shape, tensor=label_vol.unsqueeze(0), spacing=[0.48, 0.48, 0.48])
+    out_mask = core.StructuredGrid(ct_mask.shape, tensor=ct_mask.unsqueeze(0), spacing=[0.48, 0.48, 0.48])
+
+    a = -0.35
+    rot_mat = torch.tensor([[np.cos(a), -np.sin(a), 0, 0],
+                            [np.sin(a), np.cos(a), 0, 0],
+                            [0, 0, 1, 0],
+                            [0, 0, 0, 1]])
+    aff_tf = so.AffineTransform.Create(affine=rot_mat)
+    out_pred = aff_tf(out_pred)
+    out_label = aff_tf(out_label)
+    out_mask = aff_tf(out_mask)
+
+    out_mask.data[out_mask.data >= 0.5] = 1.0
+
+    out_pred = out_mask * out_pred
+    out_label = out_mask * out_label
 
     print('Saving ... ', end='')
 
-    WriteDICOM(out_pred, f'{opt.outDirectory}/skull{opt.skull}/skull{opt.skull}_prediction/')
+    WriteDICOM(out_pred, f'{opt.outDirectory}/skull{opt.skull}/skull{opt.skull}_prediction_ed/')
     WriteDICOM(out_label, f'{opt.outDirectory}/skull{opt.skull}/skull{opt.skull}_label/')
 
-    io.SaveITKFile(out_pred, f'{opt.outDirectory}/skull{opt.skull}/prediction_volume.nii.gz')
-    io.SaveITKFile(out_label, f'{opt.outDirectory}/skull{opt.skull}/label_volume.nii.gz')
+    # io.SaveITKFile(out_pred, f'{opt.outDirectory}/skull{opt.skull}/prediction_volume.nii.gz')
+    # io.SaveITKFile(out_label, f'{opt.outDirectory}/skull{opt.skull}/label_volume.nii.gz')
 
     print('done')
 
@@ -675,7 +691,7 @@ if __name__ == '__main__':
     evalOpt = {'inferBatchSize': 16,
                'skull': '005',
                'dataDirectory': '/home/sci/blakez/ucair/cute/Data/PreProcessedData/',
-               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-08-13-133702/',
+               'model_dir': '/home/sci/blakez/ucair/cute/Output/saves/2020-08-15-075005/',
                'rawDir': '/hdscratch/ucair/CUTE/Data/RawData2/',
                'outDirectory': './Output/predictions/',
                'cuda': True,
