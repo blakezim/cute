@@ -46,8 +46,16 @@ parser.add_argument('--threads', type=int, default=4, help='number of threads fo
 # parser.add_argument('--cube_size', type=int, default=[128, 128, 128], help='3D cube size')
 # parser.add_argument('--eval_size', type=int, default=[128, 128, 128], help='3D cube size')
 parser.add_argument('-s', '--samples', type=int, default=200, help='how many samples from each volume')
+parser.add_argument('-g', '--gpus', type=int, default=None,
+                    help='GPU IDs to use', nargs='*')
 
 opt = parser.parse_args()
+if opt.gpus:
+    gpu_string = ''
+    for x in opt.gpus:
+        gpu_string += f'{x},'
+    gpu_string = gpu_string[:-1]
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_string
 print(opt)
 
 
